@@ -190,8 +190,8 @@ SELECT
 
 SELECT
 	r.Der_RecordID,
-	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY (CASE WHEN r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END) DESC, r.UniqMonthID ASC) AS Der_RefRecordOrderAsc,
-	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY (CASE WHEN r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END) DESC, r.UniqMonthID DESC) AS Der_RefRecordOrderDesc
+	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY r.UniqMonthID ASC) AS Der_RefRecordOrderAsc,
+	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY r.UniqMonthID DESC) AS Der_RefRecordOrderDesc
 
 INTO #RefTemp
 
