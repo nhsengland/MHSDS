@@ -150,9 +150,7 @@ SELECT
     s.[AgeServReferClosure],
     s.[AgeServReferRejection],
 	CASE WHEN r.ServDischDate IS NOT NULL THEN 'CLOSED' ELSE 'OPEN' END AS Der_ReferralStatus,
-	NULL AS Der_RefRecordOrderDesc,
-	NULL AS Der_RefRecordOrderAsc
-
+	NULL AS Der_RefRecordOrder
 
 FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS101Referral] r
 
@@ -190,8 +188,7 @@ SELECT
 
 SELECT
 	r.Der_RecordID,
-	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY r.UniqMonthID ASC) AS Der_RefRecordOrderAsc,
-	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY r.UniqMonthID DESC) AS Der_RefRecordOrderDesc
+	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID ORDER BY r.UniqMonthID DESC) AS Der_RefRecordOrder
 
 INTO #RefTemp
 
@@ -226,8 +223,7 @@ SELECT
 UPDATE r
 
 SET 
-	r.Der_RefRecordOrderAsc = t.Der_RefRecordOrderAsc,
-	r.Der_RefRecordOrderDesc = t.Der_RefRecordOrderDesc
+	r.Der_RefRecordOrder = t.Der_RefRecordOrder
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Referral] r
 
