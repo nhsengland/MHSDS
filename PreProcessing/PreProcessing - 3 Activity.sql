@@ -118,11 +118,20 @@ SELECT
 	c.[TimeReferAndCareContact],
 	c.[UniqCareProfTeamID] AS Der_UniqCareProfTeamID,
 	c.[PlaceOfSafetyInd],
+	CASE WHEN c.OrgIDProv = 'DFC' THEN '1' ELSE c.Person_ID END AS Der_PersonID, -- derivation added to better reflect anonymous services where personID may change every month
 	NULL AS Der_ContactOrder,
+	NULL AS Der_FYContactOrder,
 	NULL AS Der_DirectContactOrder,
-	NULL AS Der_FacetoFaceContactOrder
+	NULL AS Der_FYDirectContactOrder,
+	NULL AS Der_FacetoFaceContactOrder,
+	NULL AS Der_FYFacetoFaceContactOrder,
+	h.ReportingPeriodStartDate,
+	h.ReportingPeriodEndDate,
+	h.Der_FY
 
 FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS201CareContact] c
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = c.UniqMonthID
 
 WHERE c.UniqMonthID >= @EndRP AND c.Der_Use_Submission_Flag = 'Y' 
 
@@ -161,11 +170,20 @@ SELECT
 	NULL AS TimeReferAndCareContact,
 	i.OrgIDProv + i.CareProfTeamLocalId AS Der_UniqCareProfTeamID,
 	NULL AS PlaceOfSafetyInd,
+	CASE WHEN i.OrgIDProv = 'DFC' THEN '1' ELSE i.Person_ID END AS Der_PersonID, -- derivation added to better reflect anonymous services where personID may change every month
 	NULL AS Der_ContactOrder,
+	NULL AS Der_FYContactOrder,
 	NULL AS Der_DirectContactOrder,
-	NULL AS Der_FacetoFaceContactOrder
+	NULL AS Der_FYDirectContactOrder,
+	NULL AS Der_FacetoFaceContactOrder,
+	NULL AS Der_FYFacetoFaceContactOrder,
+	h.ReportingPeriodStartDate,
+	h.ReportingPeriodEndDate,
+	h.Der_FY
 
 FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS204IndirectActivity] i
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = i.UniqMonthID
 
 WHERE i.UniqMonthID >= @EndRP AND i.Der_Use_Submission_Flag = 'Y' 
 
@@ -199,7 +217,8 @@ SELECT
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder
+	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY a.Der_Person_ID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
 
 INTO #ContOrder_Temp
 
@@ -211,7 +230,8 @@ WHERE (a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder
+	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
 
 INTO #DirectOrder_Temp
 
@@ -223,7 +243,8 @@ WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND a.C
 
 SELECT 
 	a.Der_RecordID,
-	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder
+	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
 
 INTO #F2F_Temp 
 
@@ -236,8 +257,11 @@ WHERE (a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND a.
 SELECT 
 	a.Der_RecordID,
 	a.Der_ContactOrder,
+	a.Der_FYContactOrder,
 	b.Der_FacetoFaceContactOrder,
-	c.Der_DirectContactOrder
+	b.Der_FYFacetoFaceContactOrder,
+	c.Der_DirectContactOrder,
+	c.Der_FYDirectContactOrder
 
 INTO #ActTemp
 
@@ -277,8 +301,11 @@ UPDATE a
 
 SET 
 	a.Der_ContactOrder = t.Der_ContactOrder,
+	a.Der_FYContactOrder = t.Der_FYContactOrder,
 	a.Der_DirectContactOrder = t.Der_DirectContactOrder,
-	a.Der_FacetoFaceContactOrder = t.Der_FacetoFaceContactOrder
+	a.Der_FYDirectContactOrder = t.Der_FYDirectContactOrder,
+	a.Der_FacetoFaceContactOrder = t.Der_FacetoFaceContactOrder,
+	a.Der_FYFacetoFaceContactOrder = t.Der_FYFacetoFaceContactOrder
 		
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a
 
@@ -299,7 +326,7 @@ WAITFOR DELAY '00:00:01'
 ACTIVITY - RECREATE INDEXES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
 
- --LOG START
+-- LOG START
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
