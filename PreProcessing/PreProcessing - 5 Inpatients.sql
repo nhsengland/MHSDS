@@ -129,11 +129,16 @@ SELECT
 	CASE WHEN h.DischDateHospProvSpell IS NOT NULL THEN 'CLOSED' ELSE 'OPEN' END AS Der_HospSpellStatus,
 	NULL AS Der_HospSpellRecordOrder,
 	NULL AS Der_FirstWardStayRecord,
-	NULL AS Der_LastWardStayRecord
-
+	NULL AS Der_LastWardStayRecord,
+	he.ReportingPeriodStartDate,
+	he.ReportingPeriodEndDate,
+	he.Der_FY
+	
 FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS501HospProvSpell] h
 
 LEFT JOIN [NHSE_MH_PrePublication].[dbo].[V4_MHS502WardStay] w ON w.UniqServReqID = h.UniqServReqID AND w.UniqHospProvSpellNum = h.UniqHospProvSpellNum AND w.RecordNumber = h.RecordNumber
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header he ON he.UniqMonthID = h.UniqMonthID
 
 WHERE h.UniqMonthID >= @EndRP AND h.Der_Use_Submission_Flag = 'Y' 
 
