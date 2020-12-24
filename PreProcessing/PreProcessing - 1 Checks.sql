@@ -26,15 +26,22 @@ SELECT DISTINCT
 	h.ReportingPeriodStartDate,
 	h.ReportingPeriodEndDate,
 	NULL AS [Der_MostRecentFlag],
-	NULL AS [Der_FYStart]
+	NULL AS [Der_FYStart],
+	NULL AS [Der_FY]
 
 FROM NHSE_MH_PrePublication.dbo.V4_MHS000Header h
 
 WHERE h.UniqMonthID = @EndRP +1
 
-UPDATE [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] 
-	SET [Der_MostRecentFlag] = CASE WHEN UniqMonthID = @EndRP THEN 'Y' WHEN UniqMonthID = @EndRP+1 THEN 'P' ELSE NULL END,
-		[Der_FYStart] = CASE WHEN MONTH(ReportingPeriodStartDate) = 4 THEN 'Y' ELSE NULL END
+UPDATE h 
+	SET [Der_MostRecentFlag] = CASE WHEN h.UniqMonthID = @EndRP THEN 'Y' WHEN h.UniqMonthID = @EndRP+1 THEN 'P' ELSE NULL END,
+		[Der_FYStart] = CASE WHEN MONTH(h.ReportingPeriodStartDate) = 4 THEN 'Y' ELSE NULL END,
+		[Der_FY] = d.[FinYear_YY_YY]
+
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] h
+	
+	INNER JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Dates] d ON h.UniqMonthID = d.CMHT_MonthID
+
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 RECORD COUNTS - DROP INDEXES
