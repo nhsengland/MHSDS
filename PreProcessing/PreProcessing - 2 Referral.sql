@@ -150,13 +150,18 @@ SELECT
     s.[AgeServReferClosure],
     s.[AgeServReferRejection],
 	CASE WHEN r.ServDischDate IS NOT NULL THEN 'CLOSED' ELSE 'OPEN' END AS Der_ReferralStatus,
-	NULL AS Der_RefRecordOrder
+	NULL AS Der_RefRecordOrder,
+	h.ReportingPeriodStartDate,
+	h.ReportingPeriodEndDate,
+	h.Der_FY
 
 FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS101Referral] r
 
 INNER JOIN NHSE_MH_PrePublication.dbo.V4_MHS001MPI m ON r.RecordNumber = m.RecordNumber AND m.Der_Use_Submission_Flag = 'Y' 
 
 LEFT JOIN NHSE_MH_PrePublication.dbo.V4_MHS102ServiceTypeReferredTo s ON r.UniqServReqID = s.UniqServReqID AND r.RecordNumber = s.RecordNumber AND s.Der_Use_Submission_Flag = 'Y' 
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = r.UniqMonthID
 
 WHERE r.UniqMonthID >= @EndRP AND r.Der_Use_Submission_Flag = 'Y' 
 
