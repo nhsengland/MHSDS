@@ -1,4 +1,4 @@
-Our preprocessing aims to speed up our routine processing, which gives us and our server more time to develop new analysis.
+Our preprocessing aims to speed up our routine analysis, which gives us and our server more time to develop new analysis.
 
 Every month, we receive an extract of MHSDS data for the most recent month from NHS Digital. This contains all data submitted during the most recent submission window:
   primary data (FileType 1)
