@@ -66,7 +66,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Referral Delete Primary Data End' AS Step,
+	'Assessments Delete Primary Data End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -81,7 +81,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Union Start' AS Step,
+	'Assessments Union Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 --START CODE
@@ -161,7 +161,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Union End' AS Step,
+	'Assessments Union End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -176,7 +176,7 @@ ASSESSMENTS - BUILD IN MONTH DERIVATIONS
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment In Month Derivations Start' AS Step,
+	'Assessments In Month Derivations Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 --START CODE
@@ -223,7 +223,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment In Month Derivations End' AS Step,
+	'Assessments In Month Derivations End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -238,7 +238,7 @@ ASSESSMENTS - INSERT DATA
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Insert Start' AS Step,
+	'Assessments Insert Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 --START CODE
@@ -268,9 +268,14 @@ SELECT
 	a.[Der_UniqAssessment],
 	a.[Der_AssessmentCategory],
 	NULL AS Der_AssOrderAsc, 
-	NULL AS Der_AssOrderDesc
-		
+	NULL AS Der_AssOrderDesc,
+	h.ReportingPeriodStartDate,
+	h.ReportingPeriodEndDate,
+	h.Der_FY
+	
 FROM #Ass2 a
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = a.UniqMonthID
 
 WHERE Der_UniqAssessment = 'Y'
 
@@ -280,7 +285,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Insert End' AS Step,
+	'Assessments Insert End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -368,7 +373,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Create Index Start' AS Step,
+	'Assessments Create Index Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 -- START CODE - CREATE INDEXES
@@ -381,5 +386,5 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Assessment Create Index End' AS Step,
+	'Assessments Create Index End' AS Step,
 	GETDATE() AS [TimeStamp]
