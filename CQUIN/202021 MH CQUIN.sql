@@ -88,9 +88,9 @@ SELECT
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
-	(MAX(a.Der_FYContactOrder) - MIN(a.Der_FYContactOrder)) +1 AS Der_ContInd, --counting indirect AND attended direct activity (excluding SMS or email) for the <18s in the FY
-	(MAX(a.Der_FYDirectContactOrder) - MIN(a.Der_FYDirectContactOrder)) +1 AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
-	(MAX(a.Der_FYFacetoFaceContactOrder) - MIN(a.Der_FYFacetoFaceContactOrder)) +1 AS Der_ContF2F -- counting face to face contacts only for perinatal services in the FY
+	MAX(a.Der_FYContactOrder) AS Der_ContInd, --counting indirect AND attended direct activity (excluding SMS or email) for the <18s in the FY
+	MAX(a.Der_FYDirectContactOrder) AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
+	MAX(a.Der_FYFacetoFaceContactOrder) AS Der_ContF2F -- counting face to face contacts only for perinatal services in the FY
 
 INTO #Cont
 
