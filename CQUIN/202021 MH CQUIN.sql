@@ -37,6 +37,8 @@ IF OBJECT_ID ('tempdb..#Ref') IS NOT NULL
 DROP TABLE #Ref
 
 SELECT
+	r.ReportingPeriodEndDate,
+	r.Der_FY,
 	r.UniqMonthID,
 	r.Person_ID,
 	r.UniqServReqID,
@@ -86,17 +88,15 @@ SELECT
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
-	MAX(a.Der_ContactOrder) - MIN(a.Der_ContactOrder) AS Der_ContInd, --counting indirect AND attended direct activity (excluding SMS or email) for the <18s
-	MAX(a.Der_DirectContactOrder) - MIN(a.Der_DirectContactOrder) AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s
-	MAX(a.Der_FacetoFaceContactOrder) - MIN(a.Der_FacetoFaceContactOrder) AS Der_ContF2F -- counting face to face contacts only for perinatal services
+	(MAX(a.Der_FYContactOrder) - MIN(a.Der_FYContactOrder)) +1 AS Der_ContInd, --counting indirect AND attended direct activity (excluding SMS or email) for the <18s in the FY
+	(MAX(a.Der_FYDirectContactOrder) - MIN(a.Der_FYDirectContactOrder)) +1 AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
+	(MAX(a.Der_FYFacetoFaceContactOrder) - MIN(a.Der_FYFacetoFaceContactOrder)) +1 AS Der_ContF2F -- counting face to face contacts only for perinatal services in the FY
 
 INTO #Cont
 
 FROM #Ref r
 
-INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.Person_ID = r.Person_ID and a.UniqServReqID = r.UniqServReqID
-
-WHERE a.UniqMonthID >= @StartRP -- to only count contacts in the financial year
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.Person_ID = r.Person_ID and a.UniqServReqID = r.UniqServReqID and r.Der_FY = a.Der_FY
 
 GROUP BY r.UniqMonthID, r.Person_ID, r.UniqServReqID, r.RecordNumber, r.OrgIDProv
 
@@ -137,6 +137,8 @@ IF OBJECT_ID ('tempdb..#Master') IS NOT NULL
 DROP TABLE #Master
 
 SELECT
+	r.ReportingPeriodEndDate,
+	r.Der_FY,
 	r.UniqMonthID,
 	r.Person_ID,
 	r.UniqServReqID,
@@ -182,6 +184,8 @@ IF OBJECT_ID ('tempdb..#RefAgg') IS NOT NULL
 DROP TABLE #RefAgg
 
 SELECT
+	m.ReportingPeriodEndDate,
+	m.Der_FY,
 	m.UniqMonthID,
 	m.OrgIDProv AS [Organisation Code],
 	m.Der_ServiceType AS [Service Type],
@@ -207,6 +211,8 @@ IF OBJECT_ID ('tempdb..#AssAgg') IS NOT NULL
 DROP TABLE #AssAgg
 
 SELECT
+	m.ReportingPeriodEndDate,
+	m.Der_FY,
 	m.UniqMonthID,
 	m.OrgIDProv AS [Organisation Code],
 	m.Der_ServiceType AS [Service Type],
@@ -231,6 +237,8 @@ IF OBJECT_ID ('tempdb..#UnPiv') IS NOT NULL
 DROP TABLE #UnPiv
 
 SELECT 
+	ReportingPeriodEndDate,
+	Der_FY,
 	UniqMonthID,
 	[Organisation Code],
 	[Service Type],
@@ -252,6 +260,8 @@ UNPIVOT
 UNION ALL	
 
 SELECT 
+	ReportingPeriodEndDate,
+	Der_FY,
 	UniqMonthID,
 	[Organisation Code],
 	[Service Type],
@@ -274,11 +284,8 @@ IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2021]') IS NOT 
 DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2021]
 
 SELECT
-	h.ReportingPeriodEndDate,
-	CASE 
-		WHEN YEAR(dateadd(month, 9, ReportingPeriodEndDate)) = '2020' THEN '19/20' 
-		ELSE '20/21' 
-	END AS FinancialYear,
+	u.ReportingPeriodEndDate,
+	u.Der_FY AS FinancialYear,
 	p.Region_Code,
 	p.Region_Name,
 	p.STP_Code,
