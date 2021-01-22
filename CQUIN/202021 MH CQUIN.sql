@@ -201,7 +201,7 @@ INTO #RefAgg
 
 FROM #Master m
 
-GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType
+GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.ReportingPeriodEndDate, m.Der_FY
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE AT ASSESSMENT LEVEL
@@ -227,7 +227,7 @@ FROM #Master m
 
 WHERE m.Der_LastAssessmentDate IS NOT NULL
 
-GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.Der_LastAssessmentToolName
+GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.Der_LastAssessmentToolName, m.ReportingPeriodEndDate,	m.Der_FY
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 UNPIVOT
