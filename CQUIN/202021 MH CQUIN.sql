@@ -155,7 +155,8 @@ SELECT
 	r.Der_ReferralLength,
 	r.Der_ServiceType,
 	CASE
-		WHEN r.AgeServReferRecDate <18 THEN c.Der_ContInd
+		WHEN r.Der_ServiceType = 'CYP' THEN c.Der_ContInd
+		WHEN r.Der_ServiceType = 'Perinatal' THEN c.Der_ContF2F
 		ELSE c.Der_ContDir
 	END AS Der_InYearContacts,
 	a1.Der_AssToolCompDate AS Der_FirstAssessmentDate,
