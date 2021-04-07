@@ -90,7 +90,8 @@ SELECT
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
-	MAX(a.Der_FYContactOrder) AS Der_ContInd, --counting indirect AND attended direct activity (excluding SMS or email) for the <18s in the FY
+	SUM(CASE WHEN a.Der_ActivityType = 'DIRECT' AND a.Der_FYContactOrder IS NOT NULL THEN 1 ELSE 0 END) AS Der_ContDirCYP, --counting attended direct activity (excluding SMS or email) for the <18s in the FY
+	SUM(CASE WHEN a.Der_ActivityType = 'INDIRECT' AND a.Der_FYContactOrder IS NOT NULL THEN 1 ELSE 0 END) AS Der_ContIndCYP, --counting indirect activity (excluding SMS or email) for the <18s in the FY
 	MAX(a.Der_FYDirectContactOrder) AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
 	MAX(a.Der_FYFacetoFaceContactOrder) AS Der_ContF2F -- counting face to face contacts only for perinatal services in the FY
 
@@ -155,7 +156,8 @@ SELECT
 	r.Der_ReferralLength,
 	r.Der_ServiceType,
 	CASE
-		WHEN r.Der_ServiceType = 'CYP' THEN c.Der_ContInd
+		WHEN r.Der_ServiceType = 'CYP' 
+			THEN CASE WHEN c.Der_ContDirCYP > c.Der_ContIndCYP THEN c.Der_ContDirCYP ELSE c.Der_ContIndCYP END -- to count direct and indirect contacts seperately so we don't get in the situation where a person has one indirect and one direct contact
 		WHEN r.Der_ServiceType = 'Perinatal' THEN c.Der_ContF2F
 		ELSE c.Der_ContDir
 	END AS Der_InYearContacts,
