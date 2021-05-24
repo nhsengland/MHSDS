@@ -193,7 +193,7 @@ SELECT
 	m.Der_FY,
 	m.UniqMonthID,
 	m.OrgIDProv AS [Organisation Code],
-	m.Der_ServiceType AS [Service Type],
+	CAST(m.Der_ServiceType AS varchar(50)) AS [Service Type],
 	'All' AS [Assessment Name],
 	COUNT(DISTINCT m.UniqServReqID) AS [Closed Referrals],
 	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 THEN UniqServReqID END) AS [Closed referrals open more than 14 days],
@@ -207,6 +207,30 @@ INTO #RefAgg
 FROM #Master m
 
 GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.ReportingPeriodEndDate, m.Der_FY
+
+-- CREATE A COMBINED CYP AND PERINATAL COHORT HERE
+
+INSERT INTO #RefAgg
+
+SELECT
+	m.ReportingPeriodEndDate,
+	m.Der_FY,
+	m.UniqMonthID,
+	m.OrgIDProv AS [Organisation Code],
+	'CYP and Perinatal' AS [Service Type],
+	'All' AS [Assessment Name],
+	COUNT(DISTINCT m.UniqServReqID) AS [Closed Referrals],
+	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 THEN UniqServReqID END) AS [Closed referrals open more than 14 days],
+	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 AND m.Der_InYearContacts = 1 THEN m.UniqServReqID END) AS [Closed referrals open more than 14 days with one contact],
+	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 AND m.Der_InYearContacts >1 THEN m.UniqServReqID END) AS [Closed referrals open more than 14 days with two or more contacts],
+	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 AND m.Der_InYearContacts >1 AND m.Der_FirstAssessmentDate IS NOT NULL THEN m.UniqServReqID END) AS [Closed referrals open more than 14 days with two or more contacts and one assessment],
+	COUNT(DISTINCT CASE WHEN m.Der_ReferralLength >14 AND m.Der_InYearContacts >1 AND m.Der_LastAssessmentDate IS NOT NULL THEN m.UniqServReqID END) AS [Closed referrals open more than 14 days with two or more contacts and a paired score]
+
+FROM #Master m
+
+WHERE m.Der_ServiceType <> 'Community'
+
+GROUP BY m.UniqMonthID, m.OrgIDProv, m.ReportingPeriodEndDate, m.Der_FY
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE AT ASSESSMENT LEVEL
