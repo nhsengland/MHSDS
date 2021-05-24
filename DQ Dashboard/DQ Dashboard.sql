@@ -450,9 +450,9 @@ SELECT
 	'Coverage' AS Breakdown,
 	'Indirect activity' AS [Breakdown category],
 	'Contacts with SNoMED CT' AS MeasureName,
-	COUNT(DISTINCT i.UniqCareContID) AS MeasureValue,
+	COUNT(DISTINCT i.Der_InterventionUniqID) AS MeasureValue,
 	'Total contacts' AS DenominatorName,
-	COUNT(DISTINCT a.UniqCareContID) AS DenominatorValue, 
+	COUNT(DISTINCT a.Der_ActivityUniqID) AS DenominatorValue, 
 	'SNoMED CT' AS TargetName,
 	70 AS TargetValue
 
