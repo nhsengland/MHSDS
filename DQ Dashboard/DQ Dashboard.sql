@@ -147,8 +147,8 @@ LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM NHSE_Reference.dbo.tbl_Ref_OD
 GET SUBMISSION STATUS AND POPULATE TABLE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]') IS NOT NULL
-DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -184,7 +184,7 @@ GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider
 GET NUMBER OF SUBMITTERS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -224,7 +224,7 @@ GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[STP code], o.[STP name], o.
 GET SUBMISSIONS OVER LAST FIVE MONTHS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -258,7 +258,7 @@ WHERE o.Der_OrgSubmissionStatus = 'Successful submission' AND o.UniqMonthID BETW
 GET RECORD COUNTS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -290,7 +290,7 @@ INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r ON r.UniqMonthID
 GET DQMI MHSDS DATA SET SCORE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT DISTINCT
 	o.ReportingPeriodEndDate,
@@ -325,7 +325,7 @@ WHERE d.Dataset = 'MHSDS' AND d.Report_Period_Length = 'Monthly' AND d.Effective
 GET DQMI DATA ITEM SCORES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -363,7 +363,7 @@ WHERE d.Dataset = 'MHSDS' AND d.Report_Period_Length = 'Monthly' AND d.Effective
 GET CQUIN DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -396,7 +396,7 @@ INNER JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2021] c ON o.Report
 GET SNOMED COMPLIANCE - CARE CONTACTS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -432,7 +432,7 @@ GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider
 GET SNOMED COMPLIANCE - INDIRECT ACTIVITY
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality2]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -463,3 +463,12 @@ INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.UniqMonthID = o
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
 
 GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider name], o.[STP code], o.[STP name],o.[Region code], o.[Region name], o.Der_RegionONSCode, o.Der_CurrentSubmissionWindow, o.Der_OrgSubmissionStatus
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UPDATE TABLE IN EVERYONE SCHEMA 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+	
+DROP TABLE NHSE_Sandbox_MentalHealth.Everyone.Dashboard_DataQuality
+
+SELECT * INTO NHSE_Sandbox_MentalHealth.Everyone.Dashboard_DataQuality
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_DataQuality	
