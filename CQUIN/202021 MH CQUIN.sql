@@ -247,8 +247,8 @@ SELECT
 	m.Der_ServiceType AS [Service Type],
 	m.Der_LastAssessmentToolName AS [Assessment Name],
 	COUNT(DISTINCT m.UniqServReqID) AS [Number of paired scores],
-	AVG(Der_ReftoFirstAss) AS [Average days from referral received to first assessment],
-	AVG(Der_LastAsstoDisch) AS [Average days from last assessment to referral closure]
+	SUM(Der_ReftoFirstAss) AS [Days from referral received to first assessment],
+	SUM(Der_LastAsstoDisch) AS [Days from last assessment to referral closure]
 
 INTO #AssAgg
 
@@ -302,7 +302,7 @@ FROM #AssAgg
 
 UNPIVOT 
 (
- MeasureValue FOR MeasureName IN ([Number of paired scores], [Average days from referral received to first assessment], [Average days from last assessment to referral closure])
+ MeasureValue FOR MeasureName IN ([Number of paired scores], [Days from referral received to first assessment], [Days from last assessment to referral closure])
  ) as AssAgg_U
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -338,5 +338,6 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON u.[Organisati
 -- this join gets the denominator to calculate the percentage in Tableau
 
 LEFT JOIN #Unpiv u2 ON u.UniqMonthID = u2.UniqMonthID AND u.[Organisation Code] = u2.[Organisation Code] AND u.[Service Type] = u2.[Service Type] AND
-	u.[Assessment Name] = u2.[Assessment Name] AND u.MeasureName = 'Closed referrals open more than 14 days with two or more contacts and a paired score' 
-	AND u2.MeasureName = 'Closed referrals open more than 14 days with two or more contacts'
+	u.[Assessment Name] = u2.[Assessment Name] AND 
+	(u.MeasureName = 'Closed referrals open more than 14 days with two or more contacts and a paired score' AND u2.MeasureName = 'Closed referrals open more than 14 days with two or more contacts' OR
+	u.MeasureName IN ('Days from referral received to first assessment', 'Days from last assessment to referral closure') AND u2.MeasureName = 'Number of paired scores')
