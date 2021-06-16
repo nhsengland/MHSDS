@@ -165,10 +165,7 @@ SELECT
 	a1.Der_AssessmentToolName AS Der_FirstAssessmentToolName,
 	a2.Der_AssToolCompDate AS Der_LastAssessmentDate,
 	a2.Der_AssessmentToolName AS Der_LastAssessmentToolName,
-	CASE 
-		WHEN r.ReferralRequestReceivedDate >= '2016-01-01' 
-		THEN DATEDIFF(DD, r.ReferralRequestReceivedDate, a1.Der_AssToolCompDate) 
-	END AS Der_ReftoFirstAss, --limited to those referrals that were received after the MHSDS started
+	DATEDIFF(DD, r.ReferralRequestReceivedDate, a1.Der_AssToolCompDate) AS Der_ReftoFirstAss, --limited to those referrals that were received after the MHSDS started
 	DATEDIFF(DD,a2.Der_AssToolCompDate, r.ServDischDate) AS Der_LastAsstoDisch
 
 INTO #Master
@@ -246,9 +243,9 @@ SELECT
 	m.OrgIDProv AS [Organisation Code],
 	m.Der_ServiceType AS [Service Type],
 	m.Der_LastAssessmentToolName AS [Assessment Name],
-	COUNT(DISTINCT m.UniqServReqID) AS [Number of paired scores],
-	SUM(Der_ReftoFirstAss) AS [Days from referral received to first assessment],
-	SUM(Der_LastAsstoDisch) AS [Days from last assessment to referral closure]
+	COUNT(DISTINCT CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN m.UniqServReqID END) AS [Number of paired scores],
+	SUM(CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN Der_ReftoFirstAss END) AS [Days from referral received to first assessment],
+	SUM(CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN Der_LastAsstoDisch END) AS [Days from last assessment to referral closure]
 
 INTO #AssAgg
 
