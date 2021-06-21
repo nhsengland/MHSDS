@@ -165,7 +165,7 @@ SELECT
 	a1.Der_AssessmentToolName AS Der_FirstAssessmentToolName,
 	a2.Der_AssToolCompDate AS Der_LastAssessmentDate,
 	a2.Der_AssessmentToolName AS Der_LastAssessmentToolName,
-	DATEDIFF(DD, r.ReferralRequestReceivedDate, a1.Der_AssToolCompDate) AS Der_ReftoFirstAss, --limited to those referrals that were received after the MHSDS started
+	DATEDIFF(DD, r.ReferralRequestReceivedDate, a1.Der_AssToolCompDate) AS Der_ReftoFirstAss,
 	DATEDIFF(DD,a2.Der_AssToolCompDate, r.ServDischDate) AS Der_LastAsstoDisch
 
 INTO #Master
@@ -230,6 +230,29 @@ WHERE m.Der_ServiceType <> 'Community'
 GROUP BY m.UniqMonthID, m.OrgIDProv, m.ReportingPeriodEndDate, m.Der_FY
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT COUNT OF REFERRALS AT ASSESSMENT LEVEL
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#AssDist') IS NOT NULL
+DROP TABLE #AssDist
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.Der_FY,
+	m.UniqMonthID,
+	m.OrgIDProv AS [Organisation Code],
+	m.Der_ServiceType AS [Service Type],
+	m.Der_LastAssessmentToolName AS [Assessment Name],
+	m.UniqServReqID AS [Number of paired scores],
+	m.Der_ReftoFirstAss AS [Days from referral received to first assessment],
+	m.Der_LastAsstoDisch AS [Days from last assessment to referral closure]
+
+INTO #AssDist
+
+FROM #Master m
+
+WHERE m.Der_LastAssessmentDate IS NOT NULL AND m.ReferralRequestReceivedDate >= '2016-01-01'
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE AT ASSESSMENT LEVEL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
@@ -240,20 +263,18 @@ SELECT
 	m.ReportingPeriodEndDate,
 	m.Der_FY,
 	m.UniqMonthID,
-	m.OrgIDProv AS [Organisation Code],
-	m.Der_ServiceType AS [Service Type],
-	m.Der_LastAssessmentToolName AS [Assessment Name],
-	COUNT(DISTINCT CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN m.UniqServReqID END) AS [Number of paired scores],
-	SUM(CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN Der_ReftoFirstAss END) AS [Days from referral received to first assessment],
-	SUM(CASE WHEN m.ReferralRequestReceivedDate >= '2016-01-01' THEN Der_LastAsstoDisch END) AS [Days from last assessment to referral closure]
+	m.[Organisation Code],
+	m.[Service Type],
+	m.[Assessment Name],
+	COUNT(m.[Number of paired scores]) AS [Number of paired scores],
+	SUM(m.[Days from referral received to first assessment]) AS [Days from referral received to first assessment],
+	SUM(m.[Days from last assessment to referral closure]) AS [Days from last assessment to referral closure]
 
 INTO #AssAgg
 
-FROM #Master m
+FROM #AssDist m
 
-WHERE m.Der_LastAssessmentDate IS NOT NULL
-
-GROUP BY m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.Der_LastAssessmentToolName, m.ReportingPeriodEndDate,	m.Der_FY
+GROUP BY m.ReportingPeriodEndDate, m.Der_FY, m.UniqMonthID, m.[Organisation Code], m.[Service Type], m.[Assessment Name]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 UNPIVOT
