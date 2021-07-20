@@ -40,7 +40,7 @@ SELECT
 	r.ReportingPeriodEndDate,
 	r.Der_FY,
 	r.UniqMonthID,
-	r.Person_ID,
+	CASE WHEN OrgIDProv = 'DFC' THEN '1' ELSE r.Person_ID END AS Der_PersonID,
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
@@ -48,14 +48,13 @@ SELECT
 	r.ReferralRequestReceivedDate,
 	r.ServDischDate,
 	r.ServTeamTypeRefToMH,
-	r.ReferClosReason,
-	r.DischPlanCreationDate,
 	DATEDIFF(DD,r.ReferralRequestReceivedDate, r.ServDischDate) AS Der_ReferralLength,
 	CASE 
 		WHEN r.AgeServReferRecDate < 18 THEN 'CYP'
 		WHEN r.ServTeamTypeRefToMH = 'C02' THEN 'Perinatal'
 		ELSE 'Community'
-	END AS Der_ServiceType
+	END AS Der_ServiceType,
+	ROW_NUMBER () OVER(PARTITION BY r.Person_ID, r.UniqServReqID, r.UniqMonthID ORDER BY r.MHS102UniqID DESC) AS RefRN
 
 INTO #Ref
 
@@ -85,8 +84,8 @@ IF OBJECT_ID ('tempdb..#Cont') IS NOT NULL
 DROP TABLE #Cont
 
 SELECT
-	r.UniqMonthID,
-	r.Person_ID,
+	r.Der_FY,
+	r.Der_PersonID,
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
@@ -99,9 +98,11 @@ INTO #Cont
 
 FROM #Ref r
 
-INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.Person_ID = r.Person_ID and a.UniqServReqID = r.UniqServReqID and r.Der_FY = a.Der_FY
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END  = r.Der_PersonID AND a.UniqServReqID = r.UniqServReqID AND r.Der_FY = a.Der_FY
 
-GROUP BY r.UniqMonthID, r.Person_ID, r.UniqServReqID, r.RecordNumber, r.OrgIDProv
+WHERE r.RefRN = 1
+
+GROUP BY r.Der_PersonID, r.UniqServReqID, r.RecordNumber, r.OrgIDProv, r.Der_FY
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ALL ASSESSMENTS
@@ -112,7 +113,7 @@ DROP TABLE #Ass
 
 SELECT
 	r.UniqMonthID,
-	r.Person_ID,
+	r.Der_PersonID,
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
@@ -127,9 +128,9 @@ INTO #Ass
 
 FROM #Ref r
 
-INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Assessments a ON a.Person_ID = r.Person_ID AND a.UniqServReqID = r.UniqServReqID 
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Assessments a ON CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END  = r.Der_PersonID AND a.UniqServReqID = r.UniqServReqID 
 
-WHERE a.Der_ValidScore = 'Y' -- removes records with invalid scores
+WHERE a.Der_ValidScore = 'Y' AND r.RefRN = 1-- removes records with invalid scores
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CREATE MASTER TABLE THAT JOINS CONTACTS AND 
@@ -143,7 +144,7 @@ SELECT
 	r.ReportingPeriodEndDate,
 	r.Der_FY,
 	r.UniqMonthID,
-	r.Person_ID,
+	r.Der_PersonID,
 	r.UniqServReqID,
 	r.RecordNumber,
 	r.OrgIDProv,
@@ -151,8 +152,6 @@ SELECT
 	r.ReferralRequestReceivedDate,
 	r.ServDischDate,
 	r.ServTeamTypeRefToMH,
-	r.ReferClosReason,
-	r.DischPlanCreationDate,
 	r.Der_ReferralLength,
 	r.Der_ServiceType,
 	CASE
@@ -172,11 +171,14 @@ INTO #Master
 
 FROM #Ref r
 
-LEFT JOIN #Cont c ON c.Person_ID = r.Person_ID AND c.UniqServReqID = r.UniqServReqID
+LEFT JOIN #Cont c ON c.Der_PersonID = r.Der_PersonID AND c.UniqServReqID = r.UniqServReqID AND c.Der_FY = r.Der_FY
 
-LEFT JOIN #Ass a1 ON a1.Person_ID = r.Person_ID AND a1.UniqServReqID = r.UniqServReqID AND a1.Der_AssOrderAsc = 1
+LEFT JOIN #Ass a1 ON a1.Der_PersonID = r.Der_PersonID AND a1.UniqServReqID = r.UniqServReqID AND a1.Der_AssOrderAsc = 1
 
-LEFT JOIN #Ass a2 ON a2.Person_ID = r.Person_ID AND a2.UniqServReqID = r.UniqServReqID AND a1.CodedAssToolType = a2.CodedAssToolType AND a2.Der_AssToolCompDate > a1.Der_AssToolCompDate AND a2.Der_AssOrderDesc = 1
+LEFT JOIN #Ass a2 ON a2.Der_PersonID = r.Der_PersonID AND a2.UniqServReqID = r.UniqServReqID AND a1.CodedAssToolType = a2.CodedAssToolType AND a2.Der_AssToolCompDate > a1.Der_AssToolCompDate 
+	AND a2.Der_AssOrderDesc = 1
+
+WHERE r.RefRN = 1
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE AT REFERRAL LEVEL
