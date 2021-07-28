@@ -1,0 +1,233 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ACUTE DASHBOARD 
+
+INPATIENT ADMISSIONS 
+
+CREATED BY TOM BARDSLEY 9 SEPTEMBER 2020
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+-- SET REPORTING PERIOD VARIABLES 
+
+DECLARE @RP_START INT
+DECLARE @RP_END INT
+DECLARE @RP_STARTDATE DATE
+DECLARE @RP_ENDDATE DATE
+
+SET @RP_START = 1405 
+SET @RP_END = (SELECT MAX(UniqMonthID) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header) 
+
+SET @RP_STARTDATE = (SELECT MIN(ReportingPeriodStartDate) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE UniqMonthID = @RP_START)
+SET @RP_ENDDATE = (SELECT MAX(ReportingPeriodEndDate) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE UniqMonthID = @RP_END)
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL ADMISSIONS IN REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Admissions') IS NOT NULL
+DROP TABLE #Admissions
+
+SELECT
+	i.UniqMonthID
+	,i.UniqHospProvSpellNum
+	,i.Person_ID
+	,i.OrgIDProv 
+	,o1.Organisation_Name AS Provider_Name
+	,CASE 
+		WHEN o1.ODS_Organisation_Type = 'NHS TRUST' THEN 'NHS TRUST'
+		WHEN o1.ODS_Organisation_Type = 'CARE TRUST' THEN 'NHS TRUST' 
+		WHEN o1.ODS_Organisation_Type IN ('INDEPENDENT SECTOR HEALTHCARE PROVIDER','INDEPENDENT SECTOR H/C PROVIDER SITE','NON-NHS ORGANISATION') THEN 'NON-NHS TRUST' 
+		ELSE 'Missing/Invalid' 
+	END as Provider_Type
+	,ISNULL(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
+	,ISNULL(o2.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,r.OrgIDCCGRes,'Missing/Invalid') AS CCGCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [STP name]
+	,i.StartDateHospProvSpell
+	,i.StartTimeHospProvSpell 
+	,DATEADD(MONTH, DATEDIFF(MONTH, 0, i.StartDateHospProvSpell), 0) AS Adm_MonthYear
+	,i.SourceAdmCodeHospProvSpell
+	,i.AdmMethCodeHospProvSpell 
+	,CASE 
+		WHEN i.AdmMethCodeHospProvSpell IN('21','2A') THEN 'A&E' 
+		WHEN i.AdmMethCodeHospProvSpell = '25' THEN 'Crisis Resolution Team' 
+		WHEN i.AdmMethCodeHospProvSpell IN ('11','12','13','21','23','24','2B','2D','81','98','99') THEN 'Other' 
+		ELSE 'Missing/Invalid' 
+	END as Der_AdmissionMethod
+	,i.HospitalBedTypeMH
+	,CASE 
+		WHEN ia.HospitalBedTypeMH IN ('10','11','12') THEN 'Adult Acute (CCG commissioned)' 
+		WHEN ia.HospitalBedTypeMH IN ('13','14','15','16','17','18','19','20','21','22') THEN 'Adult Specialist' 
+		WHEN ia.HospitalBedTypeMH IN ('23','24','25','26','27','28','29','30','31','32','33','34') THEN 'CYP' 
+		ELSE 'Missing/Invalid' 
+	END as BedType_Category
+	,ISNULL(b.Main_Description_60_Chars,'Missing/Invalid') AS BedType
+	,r.AgeServReferRecDate
+	,CASE 
+		WHEN r.AgeServReferRecDate BETWEEN 0 AND 17 THEN '0-17' 
+		WHEN r.AgeServReferRecDate >=18 THEN '18+' 
+		ELSE 'Missing/Invalid'
+	END as AgeCat
+	,r.UniqServReqID 
+	,r.UniqMonthID AS RefMonth
+	,r.RecordNumber AS RefRecordNumber 
+	,ROW_NUMBER()OVER(PARTITION BY i.Person_ID, i.UniqHospProvSpellNum ORDER BY r.RecordNumber DESC) AS RN
+
+INTO #Admissions
+
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i 
+
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] ia ON i.UniqHospProvSpellNum = ia.UniqHospProvSpellNum AND i.Person_ID = ia.Person_ID AND i.UniqServReqID = ia.UniqServReqID  ----- records are partitioned on spell, person and ref : therefore have joined on spell, person and ref
+	AND ia.Der_FirstWardStayRecord = 1 ---- ward stay at admission
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) 
+
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON i.OrgIDProv = o1.Organisation_Code 
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
+-- Temporary fix before 2021 CCGs come into effect 
+--LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON r.OrgIDCCGres = cc.Org_Code 
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = o2.Organisation_Code
+
+LEFT JOIN NHSE_UKHF.Data_Dictionary.vw_Mental_Health_Admitted_Patient_Classification_SCD b ON ia.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1
+
+WHERE i.Der_HospSpellRecordOrder = 1 ---- to get latest hospital spell record
+AND i.UniqMonthID BETWEEN @RP_START AND @RP_END
+AND i.StartDateHospProvSpell >= @RP_STARTDATE --- admissions only 
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET PREVIOUS CONTACTS FOR PEOPLE ADMITTED IN THE RP 	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('tempdb..#Prev_contacts') IS NOT NULL	
+DROP TABLE #Prev_contacts	
+	
+SELECT 	
+	a.UniqHospProvSpellNum
+	,a.OrgIDProv as Adm_OrgIDProv 
+	,a.Person_ID
+	,a.StartDateHospProvSpell
+	,a.StartTimeHospProvSpell 
+	,a.BedType
+	,c.UniqServReqID 
+	,c.Der_ActivityUniqID
+	,c.OrgIDProv as Cont_OrgIDProv 
+	,c.Der_ActivityType 
+	,c.AttendOrDNACode 
+	,c.ConsMediumUsed 
+	,c.Der_ContactDate 
+	,i.UniqHospProvSPellNum As Contact_spell --- to be removed 
+	,DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) AS TimeToAdm 
+	,ROW_NUMBER() OVER(PARTITION BY a.UniqHospProvSpellNum ORDER BY c.Der_ContactDate DESC) AS RN --- order to get most contact prior referral for each hospital spell 
+	
+INTO #Prev_contacts	
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity c 	
+	
+INNER JOIN #Admissions a ON c.Person_ID = a.Person_ID --- same person 	
+	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) <= 365 --- contact up to 1yr before admission
+	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) > 2 --- exclude contacts in two days before admission 
+	AND a.RN = 1 
+	
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i ON c.Person_ID = i.Person_ID AND c.UniqServReqID = i.UniqServReqID AND i.Der_HospSpellRecordOrder =1 --- to get contacts as part of hospital spell 	
+	AND i.UniqHospProvSpellNum IS NULL --- exclude contacts as part of a hospital spell 
+	
+WHERE 	
+(c.[Der_ActivityType] = 'DIRECT' AND c.AttendOrDNACode IN ('5','6') AND c.ConsMediumUsed NOT IN ('05','06')) 	
+OR c.[Der_ActivityType] = 'INDIRECT'	
+	
+	
+	
+
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+BRING TOGETHER FOR FINAL SPELL LEVEL TABLE
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Master') IS NOT NULL
+DROP TABLE #Master
+
+SELECT 
+	a.* 
+	,CASE WHEN p.UniqHospProvSpellNum IS NULL THEN 1 ELSE 0 END as NotKnown
+
+INTO #Master
+FROM #Admissions a 
+LEFT JOIN #Prev_contacts p ON a.UniqHospProvSpellNum = p.UniqHospProvSpellNum AND p.RN =1
+WHERE a.RN = 1
+
+
+
+/*>>>>>>>>>>>>>>>>>>
+AGGREGATE OUTPUT 
+>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL
+DROP TABLE #Agg
+
+SELECT 
+	Adm_MonthYear
+	,OrgIDProv 
+	,Provider_Name 
+	,Provider_Type
+	,Region_Code
+	,Region_Name
+	,CCGCode 
+	,[CCG name] 
+	,STPCode
+	,[STP name] 
+	,BedType_Category
+	,BedType 
+	,AgeCat
+	,COUNT(*) as Admissions 
+	,COUNT(*) as Admissions2 --- duplicated to use as denominator
+	,SUM(NotKnown) as Adm_NotKnown
+	,SUM(CASE WHEN Der_AdmissionMethod = 'A&E' THEN 1 ELSE 0 END) as Adm_AaE
+	,SUM(CASE WHEN Der_AdmissionMethod = 'Crisis Resolution Team' THEN 1 ELSE 0 END) as Adm_CRHT
+
+INTO #Agg
+	
+FROM #Master 
+
+GROUP BY Adm_MonthYear, OrgIDProv, Provider_Name, Provider_Type, Region_Code, Region_Name, CCGCode, [CCG name], STPCode, [STP name], Der_AdmissionMethod, BedType_Category, BedType, AgeCat
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOT AND CREATE EXTRACT
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Output') IS NOT NULL
+DROP TABLE #Output
+
+SELECT 
+	Adm_MonthYear
+	,OrgIDProv 
+	,Provider_Name 
+	,Provider_Type
+	,Region_Code
+	,Region_Name
+	,CCGCode 
+	,[CCG name] 
+	,STPCode
+	,[STP name] 
+	,BedType_Category
+	,BedType 
+	,AgeCat
+	,MeasureName
+	,MeasureValue 
+	,Admissions2 
+
+INTO #Output
+
+FROM #Agg
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(Admissions, Adm_NotKnown, Adm_AaE, Adm_CRHT)) u 
+
