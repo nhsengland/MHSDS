@@ -68,7 +68,9 @@ LEFT JOIN
 WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP
 
 AND ((r.ServTeamTypeRefToMH IN ('A02','A03','A04','A05','A06','A07','A08','A09','A10','A12','A13','A16','C02','C03','C09','C10') 
-	OR r.ServTeamTypeRefToMH IS NULL) OR r.AgeServReferRecDate BETWEEN 0 AND 17) -- to include specific teams and everyone under 18 at the time of the referral
+	OR r.ServTeamTypeRefToMH IS NULL) -- to include specific adult teams
+	
+	OR ((r.AgeServReferRecDate BETWEEN 0 AND 17) AND r.ServTeamTypeRefToMH NOT IN ('E01','E02','E03','E04','A14'))) -- and everyone under 18 at the time of the referral not accessing LDA or EIP services
 
 AND r.ServDischDate IS NOT NULL -- to include closed referrals only
 
