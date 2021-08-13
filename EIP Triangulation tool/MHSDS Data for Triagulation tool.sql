@@ -45,7 +45,7 @@ SELECT
 	r.ReferClosReason,
 	r.ReferRejectionDate,
 	r.ReferRejectReason,
-	r.UniqCareProfTeamID,
+	RIGHT(r.UniqCareProfTeamID, LEN(r.UniqCareProfTeamID) - LEN(r.OrgIDProv)) AS CareProfTeamID, -- to remove org code from start of ID
 	r.PrimReasonReferralMH
 
 INTO #Ref
@@ -81,7 +81,7 @@ FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Assessments] a
 
 INNER JOIN #Ref e ON e.RecordNumber = a.RecordNumber AND (e.UniqServReqID = a.UniqServReqID OR a.UniqServReqID IS NULL) 
 
-WHERE a.Der_UniqAssessment = 'Y' AND a.Der_ValidScore = 'Y' AND (a.Der_AssessmentToolName LIKE 'H%' OR a.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)'))
+WHERE a.Der_ValidScore = 'Y' AND (a.Der_AssessmentToolName LIKE 'H%' OR a.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)'))
 
 --/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 --GET DISTINCT ASSESSMENTS AND ORDER
@@ -112,7 +112,7 @@ SELECT
 	r.ReportingPeriodEndDate,
 	r.Person_ID,
 	r.UniqServReqID,
-	r.UniqCareProfTeamID,
+	r.CareProfTeamID,
 	SUM(CASE WHEN o.AssOrder = 1 AND o.[Recoded Assessment Tool Name] = 'HoNOS' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'HoNOSRecordedOnce',
 	SUM(CASE WHEN o.AssOrder = 2 AND o.[Recoded Assessment Tool Name] = 'HoNOS' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'HoNOSRecordedMoreThanOnce',
 	SUM(CASE WHEN o.AssOrder = 1 AND o.[Recoded Assessment Tool Name] = 'DIALOG' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'DIALOGRecordedOnce',
@@ -127,7 +127,7 @@ FROM #Ref r
 
 LEFT JOIN #AssOrder o ON r.Person_ID = o.Person_ID AND r.UniqServReqID = o.UniqServReqID AND o.AssOrder <=2
 
-GROUP BY r.ReportingPeriodEndDate, r.Person_ID, r.UniqServReqID, r.UniqCareProfTeamID
+GROUP BY r.ReportingPeriodEndDate, r.Person_ID, r.UniqServReqID, r.CareProfTeamID
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -205,18 +205,18 @@ GET ALL BED DAYS IN SAME PROVIDER
 if OBJECT_ID('tempdb..#BedDays') is not null
 DROP TABLE #BedDays
 
-SELECT DISTINCT
-	i.Person_ID,
-	i.OrgIDProv,
+SELECT 
 	i.RecordNumber,
-	DATEDIFF(dd, (CASE WHEN i.StartDateHospProvSpell < e.ReportingPeriodStartDate THEN e.ReportingPeriodStartDate ELSE i.StartDateHospProvSpell END), 
-	COALESCE(e.ServDischDate,CASE WHEN i.DischDateHospProvSpell < e.ReportingPeriodEndDate THEN i.DischDateHospProvSpell ELSE e.ReportingPeriodEndDate END)) + 1 AS BedDays
+	SUM(DATEDIFF(dd, (CASE WHEN i.StartDateHospProvSpell < e.ReportingPeriodStartDate THEN e.ReportingPeriodStartDate ELSE i.StartDateHospProvSpell END), 
+	COALESCE(e.ServDischDate,CASE WHEN i.DischDateHospProvSpell < e.ReportingPeriodEndDate THEN i.DischDateHospProvSpell ELSE e.ReportingPeriodEndDate END)) + 1) AS BedDays
 	
 INTO #BedDays
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] i
 
 INNER JOIN #Ref e ON e.RecordNumber = i.RecordNumber
+
+GROUP BY i.RecordNumber
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ALL PROCEDURES
@@ -261,7 +261,7 @@ SELECT
 	'710081004', -- 'Smoking cessation therapy'
 	'871661000000106', -- 'Referral to smoking cessation service'
 	'715282001', -- 'Combined healthy eating and physical education programme'
-	'1094331000000100', -- 'Referral for combined healthy eating and physical education programme'
+	'1094331000000103', -- 'Referral for combined healthy eating and physical education programme'
 	'281078001', -- 'Education about alcohol consumption'
 	'425014005', -- 'Substance use education'
 	'1099141000000106', -- 'Referral to alcohol misuse service'
@@ -294,7 +294,7 @@ SELECT
 
 --Carer focused education and support
 	'726052009', -- 'Carer focused education and support programme'
-	'1097201000000100', -- 'Referral for carer focused education and support programme'
+	'1097201000000108', -- 'Referral for carer focused education and support programme'
 
 --ARMS
 	'304891004', -- 'Cognitive behavioural therapy'
@@ -443,7 +443,7 @@ SELECT
 	END AS [Age category],
 	r.ReferralRequestReceivedDate,
 	COALESCE(rr.Main_Description, 'Missing / invalid') AS [Primary reason for referral],
-	r.UniqCareProfTeamID AS [Local team identifier],
+	r.CareProfTeamID AS [Local team identifier],
 
 	-- get caseload measures
 	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS [Open referrals],
@@ -561,7 +561,7 @@ INTO #Master
 
 FROM #Ref r 
 
-LEFT JOIN #AssAgg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND r.ReportingPeriodEndDate = a.ReportingPeriodEndDate AND r.UniqCareProfTeamID = a.UniqCareProfTeamID
+LEFT JOIN #AssAgg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND r.ReportingPeriodEndDate = a.ReportingPeriodEndDate AND r.CareProfTeamID = a.CareProfTeamID
 
 LEFT JOIN #ProcAgg p ON r.RecordNumber = p.RecordNumber AND r.UniqServReqID = p.UniqServReqID 
 
@@ -887,12 +887,12 @@ SELECT
 	NULL AS [Local team identifier],
 	NULL AS [Provider code],
 	NULL AS [Provider name],
-	NULL AS [CCG code],
-	NULL AS [CCG name],
-	NULL AS [CCG ONS code],
-	NULL AS [STP code],
-	NULL AS [STP name],
-	NULL AS [STP ONS code],
+	[CCG code],
+	[CCG name],
+	[CCG ONS code],
+	[STP code],
+	[STP name],
+	[STP ONS code],
 	[Region code],
 	[Region name],
 	[Region ONS code],
@@ -910,7 +910,7 @@ SELECT
 
 FROM #Master m
 
-GROUP BY m.ReportingPeriodEndDate, m.[Region code], m.[Region name], [Region ONS code], m.Ethnicity
+GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.Ethnicity
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 
@@ -919,12 +919,12 @@ SELECT
 	NULL AS [Local team identifier],
 	NULL AS [Provider code],
 	NULL AS [Provider name],
-	NULL AS [CCG code],
-	NULL AS [CCG name],
-	NULL AS [CCG ONS code],
-	NULL AS [STP code],
-	NULL AS [STP name],
-	NULL AS [STP ONS code],
+	[CCG code],
+	[CCG name],
+	[CCG ONS code],
+	[STP code],
+	[STP name],
+	[STP ONS code],
 	[Region code],
 	[Region name],
 	[Region ONS code],
@@ -942,7 +942,7 @@ SELECT
 
 FROM #Master m
 
-GROUP BY m.ReportingPeriodEndDate, m.[Region code], m.[Region name], [Region ONS code], m.Gender
+GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.Gender
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 
@@ -951,12 +951,12 @@ SELECT
 	NULL AS [Local team identifier],
 	NULL AS [Provider code],
 	NULL AS [Provider name],
-	NULL AS [CCG code],
-	NULL AS [CCG name],
-	NULL AS [CCG ONS code],
-	NULL AS [STP code],
-	NULL AS [STP name],
-	NULL AS [STP ONS code],
+	[CCG code],
+	[CCG name],
+	[CCG ONS code],
+	[STP code],
+	[STP name],
+	[STP ONS code],
 	[Region code],
 	[Region name],
 	[Region ONS code],
@@ -974,7 +974,7 @@ SELECT
 
 FROM #Master m
 
-GROUP BY m.ReportingPeriodEndDate, m.[Region code], m.[Region name], [Region ONS code], m.IMD_Decile
+GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.IMD_Decile
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET PUBLISHED AWT DATA
