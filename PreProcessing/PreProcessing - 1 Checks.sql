@@ -10,10 +10,10 @@ DECLARE @EndRP INT
 DECLARE @ReportingPeriodEnd DATE
 
 SET @EndRP = (SELECT MAX(UniqMonthID)
-FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS000Header]
+FROM [NHSE_MH_PrePublication].[Test].[MHS000Header]
 WHERE FileType = 2)
 
-SET @ReportingPeriodEnd = (SELECT MAX(ReportingPeriodEndDate) FROM NHSE_MH_PrePublication.dbo.V4_MHS000Header WHERE UniqMonthID = @EndRP) 
+SET @ReportingPeriodEnd = (SELECT MAX(ReportingPeriodEndDate) FROM [NHSE_MH_PrePublication].[Test].[MHS000Header] WHERE UniqMonthID = @EndRP) 
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 UPDATE HEADER TABLE									
@@ -29,7 +29,7 @@ SELECT DISTINCT
 	NULL AS [Der_FYStart],
 	NULL AS [Der_FY]
 
-FROM NHSE_MH_PrePublication.dbo.V4_MHS000Header h
+FROM [NHSE_MH_PrePublication].[Test].[MHS000Header] h
 
 WHERE h.UniqMonthID = @EndRP +1
 
@@ -38,7 +38,7 @@ UPDATE h
 		[Der_FYStart] = CASE WHEN MONTH(h.ReportingPeriodStartDate) = 4 THEN 'Y' ELSE NULL END,
 		[Der_FY] = d.[FinYear_YY_YY]
 
-	FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] h
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] h 
 	
 	INNER JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Dates] d ON h.UniqMonthID = d.CMHT_MonthID
 
@@ -69,11 +69,11 @@ SELECT
 
 WAITFOR DELAY '00:00:01'
 
-/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-RECORD COUNTS - INSERT DATA
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+--/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--RECORD COUNTS - INSERT DATA
+-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
 
---LOG START
+----LOG START
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
@@ -85,345 +85,297 @@ SELECT
 -- START CODE
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts]
-	SELECT 'MHS000Header' AS [TableName], OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS000Header] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProvider, UniqMonthID
+	SELECT 'MHS000Header' AS [TableName], h.OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS000Header] h
+	GROUP BY h.OrgIDProvider, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS001MPI' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS001MPI] 	
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS001MPI' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS001MPI] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS002GP' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS002GP] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS002GP' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS002GP] h
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS003AccommStatus' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS003AccommStatus]	
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS003AccommStatus' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS003AccommStatus] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS004EmpStatus' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS004EmpStatus] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS004EmpStatus' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS004EmpStatus] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS005PatInd' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS005PatInd] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS005PatInd' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS005PatInd] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS006MHCareCoord' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS006MHCareCoord] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS006MHCareCoord' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS006MHCareCoord] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS007DisabilityType' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS007DisabilityType] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS007DisabilityType' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS007DisabilityType] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS008CarePlanType' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS008CarePlanType] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS008CarePlanType' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS008CarePlanType] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS009CarePlanAgreement' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS009CarePlanAgreement] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS009CarePlanAgreement' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS009CarePlanAgreement] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS010AssTechToSupportDisTyp' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS010AssTechToSupportDisTyp] WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS010AssTechToSupportDisTyp' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS010AssTechToSupportDisTyp] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS011SocPerCircumstances' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS011SocPerCircumstances] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS011SocPerCircumstances' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS011SocPerCircumstances] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS012OverseasVisitorChargCat' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS012OverseasVisitorChargCat] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS012OverseasVisitorChargCat' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS012OverseasVisitorChargCat] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS101Referral' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS101Referral] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS101Referral' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS101Referral] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS102ServiceTypeReferredTo' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS102ServiceTypeReferredTo] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS102ServiceTypeReferredTo' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS102ServiceTypeReferredTo] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS103OtherReasonReferral' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS103OtherReasonReferral] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS103OtherReasonReferral' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS103OtherReasonReferral] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS104RTT' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS104RTT] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS104RTT' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS104RTT] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS105OnwardReferral' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS105OnwardReferral] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS105OnwardReferral' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS105OnwardReferral] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS106DischargePlanAgreement' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS106DischargePlanAgreement]
-	 WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS106DischargePlanAgreement' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS106DischargePlanAgreement] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
+
+--INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
+--	SELECT 'MHS107MedicationPrescription' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+--	FROM [NHSE_MH_PrePublication].[Test].[MHS107MedicationPrescription] 
+--	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS107MedicationPrescription' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS107MedicationPrescription] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS201CareContact' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS201CareContact] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS201CareContact' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS201CareContact] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS202CareActivity' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS202CareActivity] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS202CareActivity' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS202CareActivity] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS203OtherAttend' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS203OtherAttend] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS203OtherAttend' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS203OtherAttend] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS204IndirectActivity' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS204IndirectActivity] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS204IndirectActivity' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS204IndirectActivity] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS301GroupSession' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS301GroupSession] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS301GroupSession' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS301GroupSession] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS401MHActPeriod' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS401MHActPeriod] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS401MHActPeriod' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS401MHActPeriod] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS402RespClinicianAssignment' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS402RespClinicianAssignment] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS402RespClinicianAssignment' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS402RespClinicianAssignment] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS403ConditionalDischarge' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS403ConditionalDischarge] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS403ConditionalDischarge' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS403ConditionalDischarge] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS404CommTreatOrder' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS404CommTreatOrder] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS404CommTreatOrder' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS404CommTreatOrder] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts]
-	SELECT 'MHS405CommTreatOrderRecall' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS405CommTreatOrderRecall] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS405CommTreatOrderRecall' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS405CommTreatOrderRecall] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS501HospProvSpell' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS501HospProvSpell] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS501HospProvSpell' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
+	FROM [NHSE_MH_PrePublication].[Test].[MHS501HospProvSpell] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS502WardStay' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS502WardStay] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS502WardStay' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS502WardStay] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts]
-	SELECT 'MHS503AssignedCareProf' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS503AssignedCareProf] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS503AssignedCareProf' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS503AssignedCareProf] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS504DelayedDischarge' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS504DelayedDischarge] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS504DelayedDischarge' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS504DelayedDischarge] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS505RestrictiveIntervention' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS505RestrictiveIntervention] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS505RestrictiveIntervention' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS505RestrictiveIntervention] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS506Assault' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS506Assault] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS506Assault' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS506Assault] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS507SelfHarm' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS507SelfHarm] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS507SelfHarm' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS507SelfHarm] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS509HomeLeave' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS509HomeLeave] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS509HomeLeave' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS509HomeLeave] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS510LeaveOfAbsence' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS510LeaveOfAbsence] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS510LeaveOfAbsence' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS510LeaveOfAbsence] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS511AbsenceWithoutLeave' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS511AbsenceWithoutLeave] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS511AbsenceWithoutLeave' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS511AbsenceWithoutLeave] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS512HospSpellComm' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS512HospSpellComm] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS512HospSpellComm' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS512HospSpellComm] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS513SubstanceMisuse' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS513SubstanceMisuse] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS513SubstanceMisuse' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS513SubstanceMisuse] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS514TrialLeave' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS514TrialLeave] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS514TrialLeave' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS514TrialLeave] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS601MedHistPrevDiag' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS601MedHistPrevDiag] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS601MedHistPrevDiag' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS601MedHistPrevDiag] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS603ProvDiag' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS603ProvDiag] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS603ProvDiag' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS603ProvDiag] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS604PrimDiag' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS604PrimDiag] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS604PrimDiag' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS604PrimDiag] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS605SecDiag' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS605SecDiag] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS605SecDiag' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS605SecDiag] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS606CodedScoreAssessmentRefe' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS606CodedScoreAssessmentRefe] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS606CodedScoreAssessmentRefe' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS606CodedScoreAssessmentRefer] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS607CodedScoreAssessmentAct' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS607CodedScoreAssessmentAct] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS607CodedScoreAssessmentAct' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS607CodedScoreAssessmentAct] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
+
+--INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
+--	SELECT 'MHS608AnonSelfAssess' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+--	FROM [NHSE_MH_PrePublication].[Test].[MHS608AnonSelfAssess] h	
+--	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS608AnonSelfAssess' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS608AnonSelfAssess] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS701CPACareEpisode' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS701CPACareEpisode] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS701CPACareEpisode' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS701CPACareEpisode] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS702CPAReview' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
+	FROM [NHSE_MH_PrePublication].[Test].[MHS702CPAReview] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS702CPAReview' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS702CPAReview] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS801ClusterTool' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS801ClusterTool] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS801ClusterTool' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS801ClusterTool]
-	 WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS802ClusterAssess' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
+	FROM [NHSE_MH_PrePublication].[Test].[MHS802ClusterAssess] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS802ClusterAssess' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount]
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS802ClusterAssess] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS803CareCluster' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS803CareCluster] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS803CareCluster' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS803CareCluster] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS804FiveForensicPathways' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS804FiveForensicPathways] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS804FiveForensicPathways' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS804FiveForensicPathways] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT 'MHS901StaffDetails' AS [TableName], OrgIDProv AS OrgIDProvider, h.UniqMonthID, MIN((@EndRP - h.UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
+	FROM [NHSE_MH_PrePublication].[Test].[MHS901StaffDetails] h	
+	GROUP BY OrgIDProv, h.UniqMonthID
+
+-- GET DATA FROM PREVIOUS PRIMARY SUBMISSIONS WHERE THERE WAS NO 'PERFORMANCE' SUBMISSION
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] 
-	SELECT 'MHS901StaffDetails' AS [TableName], OrgIDProv AS OrgIDProvider, UniqMonthID, MIN((@EndRP - UniqMonthID) +2) AS SubmissionType, COUNT(*) AS [RecordCount] 
-	FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS901StaffDetails] 
-	WHERE UniqMonthID <> @EndRP OR (UniqMonthID = @EndRP AND Der_Use_Submission_Flag = 'Y')
-	GROUP BY OrgIDProv, UniqMonthID
+	SELECT r.[TableName], r.[OrgIDProvider], r.[UniqMonthID], 2 AS SubmissionType, [RecordCount] 
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_RecordCounts] r
+	INNER JOIN NHSE_MH_PrePublication.Test.MHSDS_SubmissionFlags m ON m.OrgIDProvider = r.OrgIDProvider AND m.UniqMonthID = r.UniqMonthID AND m.FileType = 1 AND m.Der_IsLatest = 'Y'
+	WHERE r.UniqMonthID = @EndRP
 
 --LOG END
 
