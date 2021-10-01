@@ -7,9 +7,9 @@ Every month, we receive an extract of MHSDS data for the most recent month from 
 
 NHS England typically receive this data a week or two before the publication of official statistics by NHS Digital so this extract is consumed into our 'PrePublication' database, where access is limited to a few people. 
 
-The PrePublication database contains the latest extract of data, plus the previous month's primary data (to make the transfer of data into the 'MHSDS' database and our derivations as easy as possible - see below)
+The PrePublication database contains the latest extract of data
 
-Once the official statistics are released by NHS Digital, the data in the PrePublication database is transferred into our main store of MHSDS data. As part of that transfer the primary data for the latest month from the MHSDS database is deleted (as its already in the PrePublication database)
+Once the official statistics are released by NHS Digital, the data in the PrePublication database is transferred into our main store of MHSDS data.
 
 Our preprocessing makes the most of the time between the data hitting the PrePublication database and the subsequent release of official statistics, so is based on the data in the latest extract
 
