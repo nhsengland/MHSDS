@@ -1,12 +1,14 @@
 
 DECLARE @EndRP INT
-DECLARE @ReportingPeriodEnd DATE
+DECLARE @FYStart INT
 
 SET @EndRP = (SELECT UniqMonthID
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
 WHERE Der_MostRecentFlag = 'Y')
 
-SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] WHERE UniqMonthID = @EndRP)
+SET @FYStart = (SELECT MAX(UniqMonthID)
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
+WHERE Der_FYStart = 'Y')
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP THREE - ACTIVITY
@@ -41,7 +43,7 @@ SELECT
 WAITFOR DELAY '00:00:01'
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-ACTIVITY - DELETE PRIMARY DATA FROM LAST MONTH
+ACTIVITY - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
 
  --LOG START
@@ -50,12 +52,12 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Activity Delete Primary Data Start' AS Step,
+	'Activity Delete Data Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 -- START CODE - DELETE DATA
 
-DELETE FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] WHERE UniqMonthID = @EndRP
+DELETE FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] WHERE CONCAT(OrgIDProv,UniqMonthID) IN (SELECT CONCAT(OrgIDProvider,UniqMonthID) FROM NHSE_MH_PrePublication.Test.MHS000Header)
 
 -- LOG END
 
@@ -63,7 +65,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Activity Delete Primary Data End' AS Step,
+	'Activity Delete Data End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -85,107 +87,115 @@ SELECT
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity]
 
-SELECT
-	'DIRECT' AS [Der_ActivityType],
-	c.MHS201UniqID AS [Der_ActivityUniqID],
-	c.[Person_ID],
+SELECT	
+	-- header
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	-- core bits
+	c.[UniqSubmissionID],
+	c.[NHSEUniqSubmissionID],
 	c.[UniqMonthID],
 	c.[OrgIDProv],
+	c.[Der_Person_ID] AS Person_ID,
 	c.[RecordNumber],
 	c.[UniqServReqID],
+	-- contacts
+	c.[UniqCareContID],
 	c.[OrgIDComm],
-	c.[CareContDate] AS Der_ContactDate,
-	c.[CareContTime] AS Der_ContactTime,
 	c.[AdminCatCode],
 	c.[SpecialisedMHServiceCode],
-	c.[ClinContDurOfCareCont] AS Der_ContactDuration,
 	c.[ConsType],
 	c.[CareContSubj],
 	c.[ConsMediumUsed],
 	c.[ActLocTypeCode],
+	c.[PlaceOfSafetyInd],
 	c.[SiteIDOfTreat],
-	c.[GroupTherapyInd],
+	NULL AS [ComPeriMHPartAssessOfferInd], -- new for v5
+	NULL AS [PlannedCareContIndicator], -- new for v5
+	NULL AS [CareContPatientTherMode], -- new for v5
 	c.[AttendOrDNACode],
 	c.[EarliestReasonOfferDate],
 	c.[EarliestClinAppDate],
 	c.[CareContCancelDate],
 	c.[CareContCancelReas],
-	c.[RepApptOfferDate],
-	c.[RepApptBookDate],
-	c.[UniqCareContID],
+	NULL AS [ReasonableAdjustmentMade], -- new for v5
 	c.[AgeCareContDate],
 	c.[ContLocDistanceHome],
 	c.[TimeReferAndCareContact],
-	c.[UniqCareProfTeamID] AS Der_UniqCareProfTeamID,
-	c.[PlaceOfSafetyInd],
-	CASE WHEN c.OrgIDProv = 'DFC' THEN '1' ELSE c.Person_ID END AS Der_PersonID, -- derivation added to better reflect anonymous services where personID may change every month
-	NULL AS Der_ContactOrder,
-	NULL AS Der_FYContactOrder,
-	NULL AS Der_DirectContactOrder,
-	NULL AS Der_FYDirectContactOrder,
-	NULL AS Der_FacetoFaceContactOrder,
-	NULL AS Der_FYFacetoFaceContactOrder,
-	h.ReportingPeriodStartDate,
-	h.ReportingPeriodEndDate,
-	h.Der_FY
+	-- derivations
+	c.[UniqCareProfTeamID] AS [Der_UniqCareProfTeamID],
+	c.[CareContDate] AS [Der_ContactDate],
+	c.[CareContTime] AS [Der_ContactTime],
+	c.[ClinContDurOfCareCont] AS [Der_ContactDuration],
+	'DIRECT' AS [Der_ActivityType],
+	c.[MHS201UniqID] AS [Der_ActivityUniqID],
+	NULL AS [Der_ContactOrder],
+	NULL AS [Der_FYContactOrder],
+	NULL AS [Der_DirectContactOrder],
+	NULL AS [Der_FYDirectContactOrder],
+	NULL AS [Der_FacetoFaceContactOrder],
+	NULL AS [Der_FYFacetoFaceContactOrder]
 
-FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS201CareContact] c
+FROM [NHSE_MH_PrePublication].[Test].[MHS201CareContact] c
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = c.UniqMonthID
-
-WHERE c.UniqMonthID >= @EndRP AND c.Der_Use_Submission_Flag = 'Y' 
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity]
 
 SELECT
-	'INDIRECT' AS [Der_ActivityType],
-	i.MHS204UniqID AS [Der_ActivityUniqID],
-	i.[Person_ID],
+	-- header
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	-- core bits
+	i.[UniqSubmissionID],
+	i.[NHSEUniqSubmissionID],
 	i.[UniqMonthID],
 	i.[OrgIDProv],
+	i.[Der_Person_ID] AS Person_ID,
 	i.[RecordNumber],
 	i.[UniqServReqID],
+	-- indirect activity
+	NULL AS [UniqCareContID],
 	i.[OrgIDComm],
-	i.IndirectActDate AS Der_ContactDate,
-	i.IndirectActTime AS Der_ContactTime,
-	NULL AS AdminCatCode,
-	NULL AS SpecialisedMHServiceCode,
-	i.DurationIndirectAct AS Der_ContactDuration,
-	NULL AS ConsType,
-	NULL AS CareContSubj,
-	NULL AS ConsMediumUsed,
-	NULL AS ActLocTypeCode,
-	NULL AS SiteIDOfTreat,
-	NULL AS GroupTherapyInd,
-	NULL AS AttendOrDNACode,
-	NULL AS EarliestReasonOfferDate,
-	NULL AS EarliestClinAppDate,
-	NULL AS CareContCancelDate,
-	NULL AS CareContCancelReas,
-	NULL AS RepApptOfferDate,
-	NULL AS RepApptBookDate,
-	NULL AS UniqCareContID,
-	NULL AS AgeCareContDate,
-	NULL AS ContLocDistanceHome,
-	NULL AS TimeReferAndCareContact,
-	i.OrgIDProv + i.CareProfTeamLocalId AS Der_UniqCareProfTeamID,
-	NULL AS PlaceOfSafetyInd,
-	CASE WHEN i.OrgIDProv = 'DFC' THEN '1' ELSE i.Person_ID END AS Der_PersonID, -- derivation added to better reflect anonymous services where personID may change every month
-	NULL AS Der_ContactOrder,
-	NULL AS Der_FYContactOrder,
-	NULL AS Der_DirectContactOrder,
-	NULL AS Der_FYDirectContactOrder,
-	NULL AS Der_FacetoFaceContactOrder,
-	NULL AS Der_FYFacetoFaceContactOrder,
-	h.ReportingPeriodStartDate,
-	h.ReportingPeriodEndDate,
-	h.Der_FY
+	NULL AS [AdminCatCode],
+	NULL AS [SpecialisedMHServiceCode],
+	NULL AS [ConsType],
+	NULL AS [CareContSubj],
+	NULL AS [ConsMediumUsed],
+	NULL AS [ActLocTypeCode],
+	NULL AS [PlaceOfSafetyInd],
+	NULL AS [SiteIDOfTreat],
+	NULL AS [ComPeriMHPartAssessOfferInd],
+	NULL AS [PlannedCareContIndicator],
+	NULL AS [CareContPatientTherMode],
+	NULL AS [AttendOrDNACode],
+	NULL AS [EarliestReasonOfferDate],
+	NULL AS [EarliestClinAppDate],
+	NULL AS [CareContCancelDate],
+	NULL AS [CareContCancelReas],
+	NULL AS [ReasonableAdjustmentMade],
+	NULL AS [AgeCareContDate],
+	NULL AS [ContLocDistanceHome],
+	NULL AS [TimeReferAndCareContact],
+	-- derivations
+	i.[OrgIDProv] + i.[CareProfTeamLocalId] AS [Der_UniqCareProfTeamID],
+	i.[IndirectActDate] AS [Der_ContactDate],
+	i.[IndirectActTime] AS [Der_ContactTime],
+	i.[DurationIndirectAct] AS [Der_ContactDuration],
+	'INDIRECT' AS [Der_ActivityType],
+	i.[MHS204UniqID] AS [Der_ActivityUniqID],
+	NULL AS [Der_ContactOrder],
+	NULL AS [Der_FYContactOrder],
+	NULL AS [Der_DirectContactOrder],
+	NULL AS [Der_FYDirectContactOrder],
+	NULL AS [Der_FacetoFaceContactOrder],
+	NULL AS [Der_FYFacetoFaceContactOrder]
 
-FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS204IndirectActivity] i
+FROM [NHSE_MH_PrePublication].[Test].[MHS204IndirectActivity] i
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = i.UniqMonthID
-
-WHERE i.UniqMonthID >= @EndRP AND i.Der_Use_Submission_Flag = 'Y' 
 
 -- LOG END
 
@@ -217,8 +227,8 @@ SELECT
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY a.Der_Person_ID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
 
 INTO #ContOrder_Temp
 
@@ -230,8 +240,8 @@ WHERE (a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY a.Der_PersonID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
 
 INTO #DirectOrder_Temp
 
@@ -243,8 +253,8 @@ WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND a.C
 
 SELECT 
 	a.Der_RecordID,
-	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
 
 INTO #F2F_Temp 
 
@@ -310,6 +320,8 @@ SET
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a
 
 LEFT JOIN #ActTemp t ON t.Der_RecordID = a.Der_RecordID
+
+WHERE a.UniqMonthID >= @FYStart
 
 -- LOG END
 
