@@ -1,12 +1,9 @@
 
 DECLARE @EndRP INT
-DECLARE @ReportingPeriodEnd DATE
 
 SET @EndRP = (SELECT UniqMonthID
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
 WHERE Der_MostRecentFlag = 'Y')
-
-SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] WHERE UniqMonthID = @EndRP)
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP FIVE - INPATIENTS
@@ -41,7 +38,7 @@ SELECT
 WAITFOR DELAY '00:00:01'
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-INPATIENTS - DELETE PRIMARY DATA FROM LAST MONTH
+INPATIENTS - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
 
  --LOG START
@@ -50,12 +47,12 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Inpatients Delete Primary Data Start' AS Step,
+	'Inpatients Delete Data Start' AS Step,
 	GETDATE() AS [TimeStamp]
 
 -- START CODE - DELETE DATA
 
-DELETE FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] WHERE UniqMonthID = @EndRP
+DELETE FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] WHERE CONCAT(OrgIDProv,UniqMonthID) IN (SELECT CONCAT(OrgIDProvider,UniqMonthID) FROM NHSE_MH_PrePublication.Test.MHS000Header)
 
 -- LOG END
 
@@ -63,7 +60,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 
 SELECT
 	@EndRP AS [Month],
-	'Inpatients Delete Primary Data End' AS Step,
+	'Inpatients Delete Data End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
@@ -84,63 +81,74 @@ SELECT
 --START CODE
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients]
-	
+
 SELECT
-	h.[MHS501UniqID],
-	h.[Person_ID],
-	h.[OrgIDProv],
+	-- core bits
+	he.[ReportingPeriodStartDate],
+	he.[ReportingPeriodEndDate],
+	he.[Der_FY],
+	h.[UniqSubmissionID],
+	h.[NHSEUniqSubmissionID],
 	h.[UniqMonthID],
+	h.[OrgIDProv],
+	h.[Der_Person_ID] AS Person_ID,
 	h.[RecordNumber],
+	-- hospital spell
+	h.[MHS501UniqID],
 	h.[UniqHospProvSpellNum],
+	--h.[UniqHospProvSpellID] AS [UniqHospProvSpellNum], new for v5
 	h.[UniqServReqID],
+	NULL AS [DecidedToAdmitDate], --new for v5
+	NULL AS [DecidedToAdmitTime], --new for v5
 	h.[StartDateHospProvSpell],
 	h.[StartTimeHospProvSpell],
 	h.[SourceAdmCodeHospProvSpell],
+	--h.[SourceAdmMHHospProvSpell] AS [SourceAdmCodeHospProvSpell], new for v5
 	h.[AdmMethCodeHospProvSpell],
+	--h.[MethAdmMHHospProvSpell] AS [AdmMethCodeHospProvSpell], new for v5
 	h.[EstimatedDischDateHospProvSpell],
 	h.[PlannedDischDateHospProvSpell],
+	h.[PlannedDischDestCode],
 	h.[DischDateHospProvSpell],
 	h.[DischTimeHospProvSpell],
 	h.[DischMethCodeHospProvSpell],
+	--h.[MethOfDischMHHospProvSpell] AS [DischMethCodeHospProvSpell], new for v5
 	h.[DischDestCodeHospProvSpell],
-	h.[InactTimeHPS],
-	h.[PlannedDischDestCode],
+	--h.[DestOfDischHospProvSpell] AS [DischDestCodeHospProvSpell], new for v5
 	h.[PostcodeDistrictMainVisitor],
 	h.[PostcodeDistrictDischDest],
+	-- ward stays
 	w.[MHS502UniqID],
 	w.[UniqWardStayID],
 	w.[StartDateWardStay],
 	w.[StartTimeWardStay],
-	w.[SiteIDOfTreat],
-	w.[WardType],
-	w.[WardSexTypeCode],
-	w.[IntendClinCareIntenCodeMH],
-	w.[WardSecLevel],
-	w.[SpecialisedMHServiceCode],
-	w.[WardCode],
-	w.[WardLocDistanceHome],
-	w.[LockedWardInd],
-	w.[InactTimeWS],
-	w.[WardAge],
-	w.[HospitalBedTypeMH],
 	w.[EndDateMHTrialLeave],
 	w.[EndDateWardStay],
 	w.[EndTimeWardStay],
+	w.[SiteIDOfTreat],
+	w.[WardType],
+	w.[WardAge],
+	w.[WardSexTypeCode],
+	w.[IntendClinCareIntenCodeMH],
+	w.[WardSecLevel],
+	w.[LockedWardInd],
+	w.[HospitalBedTypeMH],
+	w.[SpecialisedMHServiceCode],
+	w.[WardCode],
+	w.[WardLocDistanceHome],
 	CASE WHEN h.DischDateHospProvSpell IS NOT NULL THEN 'CLOSED' ELSE 'OPEN' END AS Der_HospSpellStatus,
 	NULL AS Der_HospSpellRecordOrder,
 	NULL AS Der_FirstWardStayRecord,
-	NULL AS Der_LastWardStayRecord,
-	he.ReportingPeriodStartDate,
-	he.ReportingPeriodEndDate,
-	he.Der_FY
+	NULL AS Der_LastWardStayRecord
 	
-FROM [NHSE_MH_PrePublication].[dbo].[V4_MHS501HospProvSpell] h
+FROM [NHSE_MH_PrePublication].[Test].[MHS501HospProvSpell] h
 
-LEFT JOIN [NHSE_MH_PrePublication].[dbo].[V4_MHS502WardStay] w ON w.UniqServReqID = h.UniqServReqID AND w.UniqHospProvSpellNum = h.UniqHospProvSpellNum AND w.RecordNumber = h.RecordNumber
+LEFT JOIN [NHSE_MH_PrePublication].[Test].[MHS502WardStay] w ON w.UniqServReqID = h.UniqServReqID 
+AND w.UniqHospProvSpellNum = h.UniqHospProvSpellNum 
+--AND w.UniqHospProvSpellID = h.UniqHospProvSpellID new for v5
+AND w.RecordNumber = h.RecordNumber
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header he ON he.UniqMonthID = h.UniqMonthID
-
-WHERE h.UniqMonthID >= @EndRP AND h.Der_Use_Submission_Flag = 'Y' 
 
  --LOG END
 
@@ -171,8 +179,8 @@ SELECT
 SELECT
 	i.Der_RecordID,
 	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID DESC) AS Der_HospSpellRecordOrder, 
-	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID DESC, i.InactTimeWS DESC, i.EndDateWardStay DESC, i.MHS502UniqID DESC) AS Der_FirstWardStayRecord,
-	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID ASC, i.InactTimeWS ASC, i.EndDateWardStay ASC, i.MHS502UniqID ASC) AS Der_LastWardStayRecord
+	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID DESC, i.EndDateWardStay DESC, i.MHS502UniqID DESC) AS Der_LastWardStayRecord,
+	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID ASC, i.EndDateWardStay ASC, i.MHS502UniqID ASC) AS Der_FirstWardStayRecord
 
 INTO #InpatTemp
 
