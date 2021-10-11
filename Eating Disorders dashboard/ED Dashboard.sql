@@ -1,3 +1,4 @@
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 EATING DISORDER REPORTING
 
@@ -117,17 +118,23 @@ SELECT
 	p.UniqServReqID,
 	MIN(p.DiagDate) AS DiagDate
 FROM
-(SELECT * FROM NHSE_MHSDS.dbo.MHS604PrimDiag p WHERE p.Der_Use_Submission_Flag = 'Y' AND p.UniqMonthID BETWEEN @StartRP AND @EndRP AND p.PrimDiag LIKE 'F50%'
+(SELECT p.Person_ID, p.UniqServReqID, p.DiagDate FROM NHSE_MHSDS.dbo.MHS604PrimDiag p INNER JOIN NHSE_MH_PrePublication.test.MHSDS_SubmissionFlags m ON 
+	p.NHSEUniqSubmissionID = m.NHSEUniqSubmissionID AND m.Der_Use_Submission_Flag = 'Y'
+	WHERE p.UniqMonthID BETWEEN @StartRP AND @EndRP AND p.PrimDiag LIKE 'F50%'
+
 UNION ALL 
-SELECT * FROM NHSE_MH_PrePublication.dbo.V4_MHS604PrimDiag p WHERE p.Der_Use_Submission_Flag = 'Y' AND p.UniqMonthID BETWEEN @StartRP AND @EndRP AND p.PrimDiag LIKE 'F50%') p
+
+SELECT p.Person_ID, p.UniqServReqID, p.DiagDate FROM NHSE_MH_PrePublication.Test.MHS604PrimDiag p INNER JOIN NHSE_MH_PrePublication.test.MHSDS_SubmissionFlags m ON 
+	p.NHSEUniqSubmissionID = m.NHSEUniqSubmissionID AND m.Der_Use_Submission_Flag = 'Y'
+	WHERE p.UniqMonthID BETWEEN @StartRP AND @EndRP AND p.PrimDiag LIKE 'F50%') p
 
 GROUP BY p.Person_ID, p.UniqServReqID) p ON p.UniqServReqID = r.UniqServReqID AND p.Person_ID = r.Person_ID AND h.ReportingPeriodEndDate >= p.DiagDate
 
 LEFT JOIN #Inpats i ON r.RecordNumber = i.RecordNumber AND r.UniqServReqID = i.UniqServReqID
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a1 ON a1.RecordNumber = r.RecordNumber AND a1.UniqServReqID = r.UniqServReqID AND a1.Der_FacetoFaceContactOrder = 1 
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a1 ON a1.Person_ID  = r.Person_ID AND a1.UniqServReqID = r.UniqServReqID AND a1.Der_FacetoFaceContactOrder = 1 AND r.UniqMonthID >= a1.UniqMonthID
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a2 ON a2.RecordNumber = r.RecordNumber AND a2.UniqServReqID = r.UniqServReqID AND a2.Der_FacetoFaceContactOrder = 2 
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a2 ON a2.Person_ID  = r.Person_ID AND a2.UniqServReqID = r.UniqServReqID AND a2.Der_FacetoFaceContactOrder = 2 AND r.UniqMonthID >= a2.UniqMonthID
 
 WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) AND 
 	(r.ServTeamTypeRefToMH IN ('C03','C09','C10') OR r.PrimReasonReferralMH = '12' OR p.DiagDate IS NOT NULL OR i.Der_OBDs IS NOT NULL)
@@ -378,14 +385,14 @@ SELECT
 	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate THEN s.Der_secondContactDuration END AS [Second contact duration],
 	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration = 0 OR s.Der_secondContactDuration IS NULL THEN 1 ELSE 0 
 		END AS [Second contact duration - no time recorded],
-	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration BETWEEN 1 AND 14 THEN 1 ELSE 0 END AS [Second contact duration - less than 15 mins],	
+	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration BETWEEN 1 AND 14 THEN 1 ELSE 0 END AS [Second contact duration - less than 15 mins], 
 	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration BETWEEN 15 AND 29 THEN 1 ELSE 0 END AS [Second contact duration - 15 to 30 mins],	
 	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration BETWEEN 30 AND 59 THEN 1 ELSE 0 END AS [Second contact duration - 30 mins to an hour],	
 	CASE WHEN s.Der_SecondContactDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.Der_secondContactDuration >59 THEN 1 ELSE 0 END AS [Second contact duration - over an hour],	
 	
 	-- get caseload measures
 	CASE WHEN s.ServDischDate IS NULL AND s.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS [Open referrals],
-	CASE WHEN s.ServDischDate IS NULL AND s.ReferRejectionDate IS NULL AND s.Der_LastContact IS NOT NULL THEN 1 ELSE 0 END AS [Caseload],
+	CASE WHEN s.ServDischDate IS NULL AND s.ReferRejectionDate IS NULL AND s.Der_FirstContactDate IS NOT NULL THEN 1 ELSE 0 END AS [Caseload],
 	CASE WHEN s.ReferralRequestReceivedDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [New referrals],
 	CASE WHEN s.ReferRejectionDate IS NULL AND s.ServDischDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [Closed referrals],
 	CASE WHEN s.ReferRejectionDate IS NULL AND s.ServDischDate BETWEEN s.ReportingPeriodStartDate AND s.ReportingPeriodEndDate AND s.ReferClosReason IN ('02','04') THEN 1 ELSE 0 END AS [Closed referrals - treatment complete / further treatment not appropriate],
@@ -421,18 +428,41 @@ SELECT
 	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS [Time since last contact - less than one week],
 	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS [Time since last contact - one to two weeks],
 	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS [Time since last contact - two to four weeks],
-	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) >27 THEN 1 ELSE 0 END AS [Time since last contact - four weeks or more],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 28 and 182 THEN 1 ELSE 0 END AS [Time since last contact - one to six months],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) >182 THEN 1 ELSE 0 END AS [Time since last contact - six months and over],
 	
 	-- get days since last F2F contact measures, inc categories, limited to open referrals at month end -- remove referral request received date
 	CASE WHEN s.ServDischDate IS NULL THEN DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) END AS [Time since last face to face contact],
-	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 
-		END AS [Time since last face to face contact - less than one week],
-	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 
-		END AS [Time since last face to face contact - one to two weeks],
-	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 
-		END AS [Time since last face to face contact - two to four weeks],
-	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) >27 THEN 1 ELSE 0 
-		END AS [Time since last face to face contact - four weeks or more],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS [Time since last face to face contact - less than one week],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS [Time since last face to face contact - one to two weeks],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS [Time since last face to face contact - two to four weeks],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) BETWEEN 28 and 182 THEN 1 ELSE 0  END AS [Time since last face to face contact - one to six months],
+	CASE WHEN s.ServDischDate IS NULL AND DATEDIFF(dd,s.Der_LastContact,s.ReportingPeriodEndDate) >182 THEN 1 ELSE 0  END AS [Time since last face to face contact - six months and over],
+
+	---- get waiters
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL THEN 1 ELSE 0 END AS [Referrals still waiting for first contact],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for first contact - less than one week],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for first contact - one to two weeks],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for first contact - two to four weeks],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 28 and 182 THEN 1 ELSE 0  END AS 
+		[Referrals still waiting for first contact - one to six months],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_FirstContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) >182 THEN 1 ELSE 0  END AS 
+		[Referrals still waiting for first contact - six months and over],
+
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL THEN 1 ELSE 0 END AS [Referrals still waiting for second contact],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for second contact - less than one week],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for second contact - one to two weeks],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS 
+		[Referrals still waiting for second contact - two to four weeks],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) BETWEEN 28 and 182 THEN 1 ELSE 0  END AS 
+		[Referrals still waiting for second contact - one to six months],
+	CASE WHEN s.ServDischDate IS NULL AND s.Der_SecondContactDate IS NULL AND DATEDIFF(dd,s.ReferralRequestReceivedDate,s.ReportingPeriodEndDate) >182 THEN 1 ELSE 0  END AS 
+		[Referrals still waiting for second contact - six months and over],
 
 	-- get misc other measures (inpatient, in month activity, outcomes)
 	s.Der_InMonthContacts AS [Attended contacts],
@@ -462,7 +492,7 @@ LEFT JOIN [NHSE_UKHF].[Data_Dictionary].[vw_Ethnic_Category_Code_SCD] e ON s.Eth
 
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_DataDic_ZZZ_PersonGender] g ON s.Gender = g.Person_Gender_Code
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.OrgIDCCGRes = cc.Org_Code
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.OrgIDCCGRes = cc.Org_Code
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON s.OrgIDProv = p.Organisation_Code
 
@@ -547,13 +577,29 @@ SELECT
 	SUM([Time since last contact - less than one week]) AS [Time since last contact - less than one week],
 	SUM([Time since last contact - one to two weeks]) AS [Time since last contact - one to two weeks],
 	SUM([Time since last contact - two to four weeks]) AS [Time since last contact - two to four weeks],
-	SUM([Time since last contact - four weeks or more]) AS [Time since last contact - four weeks or more],
+	SUM([Time since last contact - one to six months]) AS [Time since last contact - one to six months],
+	SUM([Time since last contact - six months and over]) AS [Time since last contact - six months and over],
 
 	SUM([Time since last face to face contact]) AS [Time since last face to face contact],
 	SUM([Time since last face to face contact - less than one week]) AS [Time since last face to face contact - less than one week],
 	SUM([Time since last face to face contact - one to two weeks]) AS [Time since last face to face contact - one to two weeks],
 	SUM([Time since last face to face contact - two to four weeks]) AS [Time since last face to face contact - two to four weeks],
-	SUM([Time since last face to face contact - four weeks or more]) AS [Time since last face to face contact - four weeks or more],
+	SUM([Time since last face to face contact - one to six months]) AS [Time since last face to face contact - one to six months],
+	SUM([Time since last face to face contact - six months and over]) AS [Time since last face to face contact - six months and over],
+
+	SUM([Referrals still waiting for first contact]) AS [Referrals still waiting for first contact],
+	SUM([Referrals still waiting for first contact - less than one week]) AS [Referrals still waiting for first contact - less than one week],
+	SUM([Referrals still waiting for first contact - one to two weeks]) AS [Referrals still waiting for first contact - one to two weeks],
+	SUM([Referrals still waiting for first contact - two to four weeks]) AS [Referrals still waiting for first contact - two to four weeks],
+	SUM([Referrals still waiting for first contact - one to six months]) AS [Referrals still waiting for first contact - one to six months],
+	SUM([Referrals still waiting for first contact - six months and over]) AS [Referrals still waiting for first contact - six months and over],
+
+	SUM([Referrals still waiting for second contact]) AS [Referrals still waiting for second contact],
+	SUM([Referrals still waiting for second contact - less than one week]) AS [Referrals still waiting for second contact - less than one week],
+	SUM([Referrals still waiting for second contact - one to two weeks]) AS [Referrals still waiting for second contact - one to two weeks],
+	SUM([Referrals still waiting for second contact - two to four weeks]) AS [Referrals still waiting for second contact - two to four weeks],
+	SUM([Referrals still waiting for second contact - one to six months]) AS [Referrals still waiting for second contact - one to six months],
+	SUM([Referrals still waiting for second contact - six months and over]) AS [Referrals still waiting for second contact - six months and over],
 
 	SUM([Attended contacts]) AS [Attended contacts],
 	SUM([DNA'd contacts]) AS [DNA'd contacts],
@@ -640,20 +686,25 @@ INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisorders]
 FROM #AggMainDash 
 
 UNPIVOT (MeasureValue FOR MeasureName IN 
-	([First contact],[Time to first contact],[Time to first contact - less than one week],[Time to first contact - one to two weeks],[Time to first contact - two to four weeks],[Time to first contact - one to six months],
-	[Time to first contact - six months and over],[First contact duration],[First contact duration - no time recorded],[First contact duration - less than 15 mins],[First contact duration - 15 to 30 mins],
-	[First contact duration - 30 mins to an hour],[First contact duration - over an hour],[Second contact],[Time to second contact],[Time to second contact - less than one week],[Time to second contact - one to two weeks],
-	[Time to second contact - two to four weeks],[Time to second contact - one to six months],[Time to second contact - six months and over],[Second contact duration],[Second contact duration - no time recorded],
-	[Second contact duration - less than 15 mins],[Second contact duration - 15 to 30 mins],[Second contact duration - 30 mins to an hour],[Second contact duration - over an hour],[Caseload],[New referrals],[Closed referrals],[Open referrals],
+	([First contact],[Time to first contact],[Time to first contact - less than one week],[Time to first contact - one to two weeks],[Time to first contact - two to four weeks],
+	[Time to first contact - one to six months],[Time to first contact - six months and over],[First contact duration],[First contact duration - no time recorded],[First contact duration - less than 15 mins],
+	[First contact duration - 15 to 30 mins],[First contact duration - 30 mins to an hour],[First contact duration - over an hour],[Second contact],[Time to second contact],
+	[Time to second contact - less than one week],[Time to second contact - one to two weeks],[Time to second contact - two to four weeks],[Time to second contact - one to six months],
+	[Time to second contact - six months and over],[Second contact duration],[Second contact duration - no time recorded],[Second contact duration - less than 15 mins],[Second contact duration - 15 to 30 mins],
+	[Second contact duration - 30 mins to an hour],[Second contact duration - over an hour],[Caseload],[New referrals],[Closed referrals],[Open referrals],
 	[Closed referrals - treatment complete / further treatment not appropriate],[Closed referrals - admitted / referred elsewhere],[Closed referrals - person moved / requested discharge],
-	[Closed referrals - DNA / refused to be seen],[Closed referrals - other reason / unknown],[Referral length],[Referral length - less than one week],[Referral length - one to two weeks],[Referral length - two to four weeks],
-	[Referral length - one to six months],[Referral length - six months and over],[Referrals not accepted],[Referrals not accepted - duplicate],[Referrals not accepted - alternative service required],
-	[Referrals not accepted - incomplete],[Referrals not accepted - missing / invalid],[Referrals not accepted length],[Time since last contact],[Time since last contact - less than one week],
-	[Time since last contact - one to two weeks],[Time since last contact - two to four weeks],[Time since last contact - four weeks or more],[Time since last face to face contact],
-	[Time since last face to face contact - less than one week],[Time since last face to face contact - one to two weeks],[Time since last face to face contact - two to four weeks],
-	[Time since last face to face contact - four weeks or more],[Attended contacts],[DNA'd contacts],[Cancelled contacts],[Indirect contacts],[Unknown / Invalid attendance code],[Admissions],[Discharges],
-	[Finished ward stays],[Distance to home],[Length of stay - hospital spell],[Length of stay - ward stay],[Occupied bed days],[Initial HoNOS eating issues scale score],[Initial current view eating issues scale score],
-	[EDEQ - Adolescent],[EDEQ])) u
+	[Closed referrals - DNA / refused to be seen],[Closed referrals - other reason / unknown],[Referral length],[Referral length - less than one week],[Referral length - one to two weeks],
+	[Referral length - two to four weeks],[Referral length - one to six months],[Referral length - six months and over],[Referrals not accepted],[Referrals not accepted - duplicate],
+	[Referrals not accepted - alternative service required],[Referrals not accepted - incomplete],[Referrals not accepted - missing / invalid],[Referrals not accepted length],[Time since last contact],
+	[Time since last contact - less than one week],[Time since last contact - one to two weeks],[Time since last contact - two to four weeks],[Time since last contact - one to six months],
+	[Time since last contact - six months and over],[Time since last face to face contact],[Time since last face to face contact - less than one week],	[Time since last face to face contact - one to two weeks],
+	[Time since last face to face contact - two to four weeks],[Time since last face to face contact - one to six months],[Time since last face to face contact - six months and over],
+	[Referrals still waiting for first contact],[Referrals still waiting for first contact - less than one week],[Referrals still waiting for first contact - one to two weeks],
+	[Referrals still waiting for first contact - two to four weeks],[Referrals still waiting for first contact - one to six months],[Referrals still waiting for first contact - six months and over],
+	[Referrals still waiting for second contact],[Referrals still waiting for second contact - less than one week],[Referrals still waiting for second contact - one to two weeks],
+	[Referrals still waiting for second contact - two to four weeks],[Referrals still waiting for second contact - one to six months],[Referrals still waiting for second contact - six months and over],
+	[Attended contacts],[DNA'd contacts],[Cancelled contacts],[Indirect contacts],[Unknown / Invalid attendance code],[Admissions],[Discharges],[Finished ward stays],[Distance to home],
+	[Length of stay - hospital spell],[Length of stay - ward stay],[Occupied bed days],[Initial HoNOS eating issues scale score],[Initial current view eating issues scale score],[EDEQ - Adolescent],[EDEQ])) u
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisorders]
 
@@ -828,59 +879,91 @@ SELECT
 	COALESCE(cc.New_Code,s.PRIMARY_LEVEL) AS [Organisation code],
 	SUM(CASE WHEN s.MEASURE_ID = 'ED86' THEN s.MEASURE_VALUE END) AS [Urgent referrals entering treatment],
 	SUM(CASE WHEN s.MEASURE_ID = 'ED86a' THEN s.MEASURE_VALUE END) AS [Urgent referrals entering treatment within one week],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED86b' THEN s.MEASURE_VALUE END) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED86c' THEN s.MEASURE_VALUE END) AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED86d' THEN s.MEASURE_VALUE END) AS [Urgent referrals entering treatment after 12 weeks],
 	SUM(CASE WHEN s.MEASURE_ID = 'ED87' THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment],
-	SUM(CASE WHEN s.MEASURE_ID IN ('ED87a','ED87b') THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment within four weeks]
+	SUM(CASE WHEN s.MEASURE_ID = 'ED87a' THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment within one week],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED87b' THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED87c' THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED87d' THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(CASE WHEN s.MEASURE_ID IN ('ED87a','ED87b') THEN s.MEASURE_VALUE END) AS [Routine referrals entering treatment within four weeks],
+	SUM(CASE WHEN s.MEASURE_ID = 'ED88' THEN s.MEASURE_VALUE END) AS [Number of referrals waiting for treatment]
 
 INTO #AWTTemp
 
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[Staging_CYPED] s
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Staging_UnsuppressedMHSDSPublicationFiles s
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.PRIMARY_LEVEL = cc.Org_Code
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.PRIMARY_LEVEL = cc.Org_Code
 
-WHERE BREAKDOWN IN ('Provider', 'CCG - GP Practice or Residence') AND MEASURE_ID IN ('ED86', 'ED86a','ED87','ED87a','ED87b') AND s.PRIMARY_LEVEL IS NOT NULL
+WHERE BREAKDOWN IN ('Provider', 'CCG - GP Practice or Residence', 'CCG') AND MEASURE_ID IN ('ED86','ED86a','ED86b','ED86c','ED86d','ED87','ED87a','ED87b','ED87c','ED87d','ED88') AND s.PRIMARY_LEVEL IS NOT NULL
 
 GROUP BY s.REPORTING_PERIOD_END, s.BREAKDOWN, COALESCE(cc.New_Code,s.PRIMARY_LEVEL)
 
 INSERT INTO #AWTTemp
 
 SELECT
-	s.Effective_Snapshot_Date AS ReportingPeriodEnd,
+	s.Date AS ReportingPeriodEnd,
 	'SDCS' AS DataSource,
 	'Provider' AS OrgType,
-	s.Organisation_Code AS [Organisation code],
-	SUM(CASE WHEN s.Urgent_Routine = 'Urgent' THEN s.No_Of_Patients END ) AS [Urgent referrals entering treatment],
-	SUM(CASE WHEN s.Urgent_Routine = 'Urgent' AND s.Weeks_Since_Referral = '>0-1 week' THEN No_Of_Patients END) AS [Urgent referrals entering treatment within one week],
-	SUM(CASE WHEN s.Urgent_Routine = 'Routine' THEN s.No_Of_Patients END ) AS [Routine referrals entering treatment],
-	SUM(CASE WHEN s.Urgent_Routine = 'Routine' AND s.Weeks_Since_Referral IN ('>0-1 week', '>1-4 weeks') THEN No_Of_Patients END) AS [Routine referrals entering treatment within four weeks]
+	s.Provider_Org_code AS [Organisation code],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN s.Total_Pathways END ) AS [Urgent referrals entering treatment],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_0_1_Weeks END) AS [Urgent referrals entering treatment within one week],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_4_5_Weeks + Gt_5_6_Weeks + Gt_6_7_Weeks + Gt_7_8_Weeks + Gt_8_9_Weeks + Gt_9_10_Weeks + Gt_10_11_Weeks + Gt_11_12_Weeks END) 
+		AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_12_Plus_Weeks END) AS [Urgent referrals entering treatment after 12 weeks],
+	
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN s.Total_Pathways END ) AS [Routine referrals entering treatment],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_0_1_Weeks END) AS [Routine referrals entering treatment within one week],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_4_5_Weeks + Gt_5_6_Weeks + Gt_6_7_Weeks + Gt_7_8_Weeks + Gt_8_9_Weeks + Gt_9_10_Weeks + Gt_10_11_Weeks + Gt_11_12_Weeks END) 
+		AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_12_Plus_Weeks END) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_0_1_Weeks + Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Routine referrals entering treatment within four weeks],
 
-FROM [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Prov1] s
+	SUM(CASE WHEN s.Description LIKE '%incomplete%' THEN s.Total_Pathways END ) AS [Number of referrals waiting for treatment]
 
-GROUP BY s.Effective_Snapshot_Date, s.Organisation_Code
+FROM [NHSE_Sandbox_Policy].[dbo].[tbl_MHCYP_REPORT] s
+
+GROUP BY s.Date, s.Provider_Org_code
 
 INSERT INTO #AWTTemp
 
 SELECT
-	s.Effective_Snapshot_Date AS ReportingPeriodEnd,
+	s.Date AS ReportingPeriodEnd,
 	'SDCS' AS DataSource,
 	'CCG' AS OrgType,
-	COALESCE(cc.New_Code COLLATE DATABASE_DEFAULT,s.Organisation_Code COLLATE DATABASE_DEFAULT) AS [Organisation code],
-	SUM(CASE WHEN s.Urgent_Routine = 'Urgent' THEN s.No_Of_Patients END ) AS [Urgent referrals entering treatment],
-	SUM(CASE WHEN s.Urgent_Routine = 'Urgent' AND s.Weeks_Since_Referral = '>0-1 week' THEN No_Of_Patients END) AS [Urgent referrals entering treatment within one week],
-	SUM(CASE WHEN s.Urgent_Routine = 'Routine' THEN s.No_Of_Patients END ) AS [Routine referrals entering treatment],
-	SUM(CASE WHEN s.Urgent_Routine = 'Routine' AND s.Weeks_Since_Referral IN ('>0-1 week', '>1-4 weeks') THEN No_Of_Patients END) AS [Routine referrals entering treatment within four weeks]
+	COALESCE(cc.New_Code COLLATE DATABASE_DEFAULT,s.CCG_Org_Code COLLATE DATABASE_DEFAULT) AS [Organisation code],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN s.Total_Pathways END ) AS [Urgent referrals entering treatment],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_0_1_Weeks END) AS [Urgent referrals entering treatment within one week],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_4_5_Weeks + Gt_5_6_Weeks + Gt_6_7_Weeks + Gt_7_8_Weeks + Gt_8_9_Weeks + Gt_9_10_Weeks + Gt_10_11_Weeks + Gt_11_12_Weeks END) 
+		AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (urgent cases) completed this quarter' THEN Gt_12_Plus_Weeks END) AS [Urgent referrals entering treatment after 12 weeks],
+	
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN s.Total_Pathways END ) AS [Routine referrals entering treatment],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_0_1_Weeks END) AS [Routine referrals entering treatment within one week],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_4_5_Weeks + Gt_5_6_Weeks + Gt_6_7_Weeks + Gt_7_8_Weeks + Gt_8_9_Weeks + Gt_9_10_Weeks + Gt_10_11_Weeks + Gt_11_12_Weeks END) 
+		AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_12_Plus_Weeks END) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(CASE WHEN s.Description = 'CYP ED care pathways (routine cases) completed this quarter' THEN Gt_0_1_Weeks + Gt_1_2_Weeks + Gt_2_3_Weeks + Gt_3_4_Weeks END) AS [Routine referrals entering treatment within four weeks],
 
-FROM [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Comm1] s
+	SUM(CASE WHEN s.Description LIKE '%incomplete%' THEN s.Total_Pathways END ) AS [Number of referrals waiting for treatment]
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.Organisation_Code = cc.Org_Code COLLATE DATABASE_DEFAULT
+FROM [NHSE_Sandbox_Policy].[dbo].[tbl_MHCYP_REPORT] s
 
-GROUP BY s.Effective_Snapshot_Date, COALESCE(cc.New_Code COLLATE DATABASE_DEFAULT,s.Organisation_Code COLLATE DATABASE_DEFAULT)
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON s.CCG_Org_Code = cc.Org_Code COLLATE DATABASE_DEFAULT
+
+GROUP BY s.Date, COALESCE(cc.New_Code COLLATE DATABASE_DEFAULT,s.CCG_Org_Code COLLATE DATABASE_DEFAULT)
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-GET OUTPUT
+COMBINE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]') IS NOT NULL
-DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+IF OBJECT_ID ('tempdb..#AWTTempFinal') IS NOT NULL
+DROP TABLE #AWTTempFinal
 
 -- provider
 
@@ -890,12 +973,20 @@ SELECT
 	a.OrgType,
 	a.[Organisation code],
 	p.Organisation_Name AS [Organisation name],
-	[Urgent referrals entering treatment],
-	[Urgent referrals entering treatment within one week],
-	[Routine referrals entering treatment],
-	[Routine referrals entering treatment within four weeks]
+	a.[Urgent referrals entering treatment],
+	a.[Urgent referrals entering treatment within one week],
+	a.[Urgent referrals entering treatment between one and four weeks],
+	a.[Urgent referrals entering treatment between four and 12 weeks],
+	a.[Urgent referrals entering treatment after 12 weeks],
+	a.[Routine referrals entering treatment],
+	a.[Routine referrals entering treatment within one week],
+	a.[Routine referrals entering treatment between one and four weeks],
+	a.[Routine referrals entering treatment between four and 12 weeks],
+	a.[Routine referrals entering treatment after 12 weeks],
+	a.[Routine referrals entering treatment within four weeks],
+	a.[Number of referrals waiting for treatment]
 
-INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+INTO #AWTTempFinal
 	   
 FROM #AWTTemp a
 
@@ -905,7 +996,7 @@ WHERE OrgType = 'Provider'
 
 -- CCG
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+INSERT INTO #AWTTempFinal
 
 SELECT
 	a.ReportingPeriodEnd,
@@ -913,10 +1004,18 @@ SELECT
 	a.OrgType,
 	a.[Organisation code],
 	COALESCE(c.Organisation_Name,'Missing / Invalid') AS [Organisation name],
-	[Urgent referrals entering treatment],
-	[Urgent referrals entering treatment within one week],
-	[Routine referrals entering treatment],
-	[Routine referrals entering treatment within four weeks]
+	a.[Urgent referrals entering treatment],
+	a.[Urgent referrals entering treatment within one week],
+	a.[Urgent referrals entering treatment between one and four weeks],
+	a.[Urgent referrals entering treatment between four and 12 weeks],
+	a.[Urgent referrals entering treatment after 12 weeks],
+	a.[Routine referrals entering treatment],
+	a.[Routine referrals entering treatment within one week],
+	a.[Routine referrals entering treatment between one and four weeks],
+	a.[Routine referrals entering treatment between four and 12 weeks],
+	a.[Routine referrals entering treatment after 12 weeks],
+	a.[Routine referrals entering treatment within four weeks],
+	a.[Number of referrals waiting for treatment]
 	   
 FROM #AWTTemp a
 
@@ -926,7 +1025,7 @@ WHERE OrgType = 'CCG'
 
 -- STP
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+INSERT INTO #AWTTempFinal
 
 SELECT
 	a.ReportingPeriodEnd,
@@ -934,10 +1033,18 @@ SELECT
 	'STP' AS OrgType,
 	c.STP_Code AS [Organisation code],
 	COALESCE(c.STP_Name,'Missing / Invalid') AS [Organisation name],
-	SUM([Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
-	SUM([Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
-	SUM([Routine referrals entering treatment]) AS [Routine referrals entering treatment],
-	SUM([Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks]
+	SUM(a.[Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
+	SUM(a.[Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
+	SUM(a.[Urgent referrals entering treatment between one and four weeks]) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(a.[Urgent referrals entering treatment between four and 12 weeks]) AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(a.[Urgent referrals entering treatment after 12 weeks]) AS [Urgent referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment]) AS [Routine referrals entering treatment],
+	SUM(a.[Routine referrals entering treatment within one week]) AS [Routine referrals entering treatment within one week],
+	SUM(a.[Routine referrals entering treatment between one and four weeks]) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(a.[Routine referrals entering treatment between four and 12 weeks]) AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(a.[Routine referrals entering treatment after 12 weeks]) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks],
+	SUM(a.[Number of referrals waiting for treatment]) AS [Number of referrals waiting for treatment]
 	   
 FROM #AWTTemp a
 
@@ -949,7 +1056,7 @@ GROUP BY a.ReportingPeriodEnd, a.DataSource, c.STP_Code, c.STP_Name
 
 -- Region
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+INSERT INTO #AWTTempFinal
 
 SELECT
 	a.ReportingPeriodEnd,
@@ -957,10 +1064,18 @@ SELECT
 	'Region' AS OrgType,
 	c.Region_Code AS [Organisation code],
 	COALESCE(c.Region_Name,'Missing / Invalid') AS [Organisation name],
-	SUM([Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
-	SUM([Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
-	SUM([Routine referrals entering treatment]) AS [Routine referrals entering treatment],
-	SUM([Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks]
+	SUM(a.[Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
+	SUM(a.[Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
+	SUM(a.[Urgent referrals entering treatment between one and four weeks]) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(a.[Urgent referrals entering treatment between four and 12 weeks]) AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(a.[Urgent referrals entering treatment after 12 weeks]) AS [Urgent referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment]) AS [Routine referrals entering treatment],
+	SUM(a.[Routine referrals entering treatment within one week]) AS [Routine referrals entering treatment within one week],
+	SUM(a.[Routine referrals entering treatment between one and four weeks]) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(a.[Routine referrals entering treatment between four and 12 weeks]) AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(a.[Routine referrals entering treatment after 12 weeks]) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks],
+	SUM(a.[Number of referrals waiting for treatment]) AS [Number of referrals waiting for treatment]
 	   
 FROM #AWTTemp a
 
@@ -972,7 +1087,7 @@ GROUP BY a.ReportingPeriodEnd, a.DataSource, c.Region_Code, c.Region_Name
 
 -- England
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+INSERT INTO #AWTTempFinal
 
 SELECT
 	a.ReportingPeriodEnd,
@@ -980,13 +1095,97 @@ SELECT
 	'England' AS OrgType,
 	'ENG' AS [Organisation code],
 	'England' AS [Organisation name],
-	SUM([Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
-	SUM([Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
-	SUM([Routine referrals entering treatment]) AS [Routine referrals entering treatment],
-	SUM([Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks]
+	SUM(a.[Urgent referrals entering treatment]) AS [Urgent referrals entering treatment],
+	SUM(a.[Urgent referrals entering treatment within one week]) AS [Urgent referrals entering treatment within one week],
+	SUM(a.[Urgent referrals entering treatment between one and four weeks]) AS [Urgent referrals entering treatment between one and four weeks],
+	SUM(a.[Urgent referrals entering treatment between four and 12 weeks]) AS [Urgent referrals entering treatment between four and 12 weeks],
+	SUM(a.[Urgent referrals entering treatment after 12 weeks]) AS [Urgent referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment]) AS [Routine referrals entering treatment],
+	SUM(a.[Routine referrals entering treatment within one week]) AS [Routine referrals entering treatment within one week],
+	SUM(a.[Routine referrals entering treatment between one and four weeks]) AS [Routine referrals entering treatment between one and four weeks],
+	SUM(a.[Routine referrals entering treatment between four and 12 weeks]) AS [Routine referrals entering treatment between four and 12 weeks],
+	SUM(a.[Routine referrals entering treatment after 12 weeks]) AS [Routine referrals entering treatment after 12 weeks],
+	SUM(a.[Routine referrals entering treatment within four weeks]) AS [Routine referrals entering treatment within four weeks],
+	SUM(a.[Number of referrals waiting for treatment]) AS [Number of referrals waiting for treatment]
 	   
 FROM #AWTTemp a
 
 WHERE OrgType = 'Provider'
 
 GROUP BY a.ReportingPeriodEnd, a.DataSource
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET OUTPUT
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+
+SELECT
+	a.ReportingPeriodEnd,
+	a.DataSource,
+	a.OrgType,
+	a.[Organisation code],
+	a.[Organisation name],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment] AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Urgent referrals entering treatment] /5.0,0)*5 AS VARCHAR),'*') 
+	END AS [Urgent referrals entering treatment],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment within one week] AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment within one week]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Urgent referrals entering treatment within one week] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Urgent referrals entering treatment within one week],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment between one and four weeks] AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment between one and four weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Urgent referrals entering treatment between one and four weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Urgent referrals entering treatment between one and four weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment between four and 12 weeks] AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment between four and 12 weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Urgent referrals entering treatment between four and 12 weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Urgent referrals entering treatment between four and 12 weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment after 12 weeks] AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment after 12 weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Urgent referrals entering treatment after 12 weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Urgent referrals entering treatment after 12 weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Urgent referrals entering treatment within one week]*1.0 / NULLIF(a.[Urgent referrals entering treatment],0) AS VARCHAR)
+		WHEN a.[Urgent referrals entering treatment within one week]  < 5 THEN '*' 
+		ELSE ISNULL(CAST(a.[Urgent referrals entering treatment within one week]*1.0 / a.[Urgent referrals entering treatment] AS VARCHAR),'*')
+	END AS [Percent of urgent referrals entering treatment within one week],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment] AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment within one week] AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment within one week]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment within one week] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment within one week],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment between one and four weeks] AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment between one and four weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment between one and four weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment between one and four weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment between four and 12 weeks] AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment between four and 12 weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment between four and 12 weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment between four and 12 weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment after 12 weeks] AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment after 12 weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment after 12 weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment after 12 weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment within four weeks] AS VARCHAR) 
+		WHEN a.[Routine referrals entering treatment within four weeks]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Routine referrals entering treatment within four weeks] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Routine referrals entering treatment within four weeks],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Number of referrals waiting for treatment] AS VARCHAR) 
+		WHEN a.[Number of referrals waiting for treatment]  < 5 THEN '*' ELSE ISNULL(CAST(ROUND(a.[Number of referrals waiting for treatment] /5.0,0)*5 AS VARCHAR),'*')
+	END AS [Number of referrals waiting for treatment],
+	CASE 
+		WHEN a.OrgType = 'England' THEN CAST(a.[Routine referrals entering treatment within four weeks]*1.0 / NULLIF(a.[Routine referrals entering treatment],0) AS VARCHAR)
+		WHEN a.[Routine referrals entering treatment within four weeks]  < 5 THEN '*' 
+		ELSE ISNULL(CAST(a.[Routine referrals entering treatment within four weeks]*1.0 / a.[Routine referrals entering treatment] AS VARCHAR),'*')
+	END AS [Percent of routine referrals entering treatment within four weeks]
+
+INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EatingDisordersAWT]
+
+FROM #AWTTempFinal a
