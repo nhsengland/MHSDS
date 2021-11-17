@@ -1,4 +1,3 @@
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 MHSDS DATA FOR EIP TRIANGULATION TOOL
 
@@ -73,15 +72,17 @@ SELECT
 	a.Der_PreferredTermSNOMED,
 	a.CodedAssToolType,
 	a.PersScore,
-	CASE WHEN a.Der_AssessmentToolName LIKE 'H%' THEN 'HoNOS' ELSE a.Der_AssessmentToolName END AS [Recoded Assessment Tool Name]
+	CASE WHEN a.Der_AssessmentToolName LIKE 'H%' THEN 'HoNOS' ELSE a.Der_AssessmentToolName END AS [Recoded Assessment Tool Name],
+	a.Der_AssOrderAsc,
+	a.Der_AssOrderDesc
 
 INTO #Ass 
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Assessments] a
 
-INNER JOIN #Ref e ON e.RecordNumber = a.RecordNumber AND (e.UniqServReqID = a.UniqServReqID OR a.UniqServReqID IS NULL) 
+INNER JOIN #Ref e ON e.RecordNumber = a.RecordNumber AND e.UniqServReqID = a.UniqServReqID
 
-WHERE a.Der_ValidScore = 'Y' AND (a.Der_AssessmentToolName LIKE 'H%' OR a.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)'))
+WHERE a.Der_AssOrderAsc IS NOT NULL AND (a.Der_AssessmentToolName LIKE 'HoNOS%' OR a.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)'))
 
 --/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 --GET DISTINCT ASSESSMENTS AND ORDER
@@ -119,7 +120,7 @@ SELECT
 	SUM(CASE WHEN o.AssOrder = 2 AND o.[Recoded Assessment Tool Name] = 'DIALOG' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'DIALOGRecordedMoreThanOnce',
 	SUM(CASE WHEN o.AssOrder = 1 AND o.[Recoded Assessment Tool Name] = 'Questionnaire about the Process of Recovery (QPR)' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'QPRRecordedOnce',
 	SUM(CASE WHEN o.AssOrder = 2 AND o.[Recoded Assessment Tool Name] = 'Questionnaire about the Process of Recovery (QPR)' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'QPRRecordedMoreThanOnce',
-	COUNT(CASE WHEN o.AssOrder = 2 AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN o.AssOrder END) AS 'TwoMeasuresTwice'
+	SUM(CASE WHEN o.AssOrder = 2 AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'TwoMeasuresTwice'
 
 INTO #AssAgg
 
@@ -128,7 +129,6 @@ FROM #Ref r
 LEFT JOIN #AssOrder o ON r.Person_ID = o.Person_ID AND r.UniqServReqID = o.UniqServReqID AND o.AssOrder <=2
 
 GROUP BY r.ReportingPeriodEndDate, r.Person_ID, r.UniqServReqID, r.CareProfTeamID
-
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET HoNOS CHANGE PROFILE - IDENTIFY FIRST AND LAST
@@ -142,19 +142,20 @@ SELECT
 	r.Person_ID,
 	r.UniqServReqID,
 	r.Der_AssToolCompDate,
+	r.Der_AssessmentToolName,
 	r.CodedAssToolType,
 	CAST(CAST(r.PersScore AS NUMERIC(19,4)) AS INT) AS PersScore,
-	ROW_NUMBER () OVER (PARTITION BY r.Person_ID, r.UniqServReqID, r.CodedAssToolType ORDER BY r.Der_AssToolCompDate ASC, r.Der_AssUniqID ASC) AS FirstScore,
-	ROW_NUMBER () OVER (PARTITION BY r.Person_ID, r.UniqServReqID, r.CodedAssToolType ORDER BY r.Der_AssToolCompDate DESC, r.Der_AssUniqID DESC) AS LastScore
+	r.Der_AssOrderAsc AS FirstScore,
+	r.Der_AssOrderDesc AS LastScore
 
 INTO #FandL
 
 FROM #Ass r
 
-WHERE r.Der_AssessmentToolName = 'HoNOS Working Age Adults'
+WHERE r.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)','HoNOS Working Age Adults')
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-GET HoNOS CHANGE PROFILE - SCORE CHANGE BY REFERRAL
+GET ASSESSMENT CHANGE PROFILE - SCORE CHANGE BY REFERRAL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 IF OBJECT_ID ('tempdb..#Score') IS NOT NULL
@@ -163,6 +164,7 @@ DROP TABLE #Score
 SELECT
 	f.Person_ID,
 	f.UniqServReqID,
+	--HONOS INITIAL
 	MAX(CASE WHEN f.CodedAssToolType = '979641000000103' THEN f.PersScore END) AS 'BEH_Ini',
 	MAX(CASE WHEN f.CodedAssToolType = '979651000000100' THEN f.PersScore END) AS 'INJ_Ini',
 	MAX(CASE WHEN f.CodedAssToolType = '979661000000102' THEN f.PersScore END) AS 'SUB_Ini',
@@ -175,6 +177,22 @@ SELECT
 	MAX(CASE WHEN f.CodedAssToolType = '979731000000102' THEN f.PersScore END) AS 'ADL_Ini',
 	MAX(CASE WHEN f.CodedAssToolType = '979741000000106' THEN f.PersScore END) AS 'LIV_Ini',
 	MAX(CASE WHEN f.CodedAssToolType = '979751000000109' THEN f.PersScore END) AS 'OCC_Ini',
+	--DIALOG INITIAL
+	MAX(CASE WHEN f.CodedAssToolType = '1037651000000100' THEN f.PersScore END) AS 'MEN_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037661000000102' THEN f.PersScore END) AS 'PHY_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037671000000109' THEN f.PersScore END) AS 'JOB_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037681000000106' THEN f.PersScore END) AS 'ACC_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037691000000108' THEN f.PersScore END) AS 'LEI_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037701000000108' THEN f.PersScore END) AS 'FRD_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037711000000105' THEN f.PersScore END) AS 'PRT_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037721000000104' THEN f.PersScore END) AS 'SAF_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037731000000102' THEN f.PersScore END) AS 'MED_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037741000000106' THEN f.PersScore END) AS 'PRA_Ini',
+	MAX(CASE WHEN f.CodedAssToolType = '1037751000000109' THEN f.PersScore END) AS 'CON_Ini',
+	--QPR INITIAL
+	MAX(CASE WHEN f.CodedAssToolType = '1035441000000106' THEN f.PersScore END) AS 'QPR_Ini',
+
+	--HONOS FINAL
 	MAX(CASE WHEN f2.CodedAssToolType = '979641000000103' THEN f2.PersScore END) AS 'BEH_Fin',
 	MAX(CASE WHEN f2.CodedAssToolType = '979651000000100' THEN f2.PersScore END) AS 'INJ_Fin',
 	MAX(CASE WHEN f2.CodedAssToolType = '979661000000102' THEN f2.PersScore END) AS 'SUB_Fin',
@@ -186,8 +204,26 @@ SELECT
 	MAX(CASE WHEN f2.CodedAssToolType = '979721000000104' THEN f2.PersScore END) AS 'REL_Fin',
 	MAX(CASE WHEN f2.CodedAssToolType = '979731000000102' THEN f2.PersScore END) AS 'ADL_Fin',
 	MAX(CASE WHEN f2.CodedAssToolType = '979741000000106' THEN f2.PersScore END) AS 'LIV_Fin',
-	MAX(CASE WHEN f2.CodedAssToolType = '979751000000109' THEN f2.PersScore END) AS 'OCC_Fin'
-	
+	MAX(CASE WHEN f2.CodedAssToolType = '979751000000109' THEN f2.PersScore END) AS 'OCC_Fin',
+	--DIALOG FINAL
+	MAX(CASE WHEN f2.CodedAssToolType = '1037651000000100' THEN f2.PersScore END) AS 'MEN_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037661000000102' THEN f2.PersScore END) AS 'PHY_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037671000000109' THEN f2.PersScore END) AS 'JOB_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037681000000106' THEN f2.PersScore END) AS 'ACC_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037691000000108' THEN f2.PersScore END) AS 'LEI_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037701000000108' THEN f2.PersScore END) AS 'FRD_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037711000000105' THEN f2.PersScore END) AS 'PRT_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037721000000104' THEN f2.PersScore END) AS 'SAF_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037731000000102' THEN f2.PersScore END) AS 'MED_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037741000000106' THEN f2.PersScore END) AS 'PRA_Fin',
+	MAX(CASE WHEN f2.CodedAssToolType = '1037751000000109' THEN f2.PersScore END) AS 'CON_Fin',
+	--QPR FINAL
+	MAX(CASE WHEN f2.CodedAssToolType = '1035441000000106' THEN f2.PersScore END) AS 'QPR_Fin',
+	--ASS COUNT
+	SUM(CASE WHEN f2.Der_AssessmentToolName = 'DIALOG' THEN 1 ELSE 0 END) AS 'PairedDialog',
+	SUM(CASE WHEN f2.Der_AssessmentToolName = 'Questionnaire about the Process of Recovery (QPR)' THEN 1 ELSE 0 END) AS 'PairedQPR',
+	SUM(CASE WHEN f2.Der_AssessmentToolName = 'HoNOS Working Age Adults' THEN 1 ELSE 0 END) AS 'PairedHoNOS'
+
 INTO #Score
 
 FROM #FandL f
@@ -199,24 +235,24 @@ WHERE f.FirstScore = 1
 GROUP BY f.Person_ID, f.UniqServReqID
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-GET ALL BED DAYS IN SAME PROVIDER
+GET ALL BED DAYS IN ANY PROVIDER
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 if OBJECT_ID('tempdb..#BedDays') is not null
 DROP TABLE #BedDays
 
 SELECT 
-	i.RecordNumber,
-	SUM(DATEDIFF(dd, (CASE WHEN i.StartDateHospProvSpell < e.ReportingPeriodStartDate THEN e.ReportingPeriodStartDate ELSE i.StartDateHospProvSpell END), 
+	e.RecordNumber,
+	SUM(DATEDIFF(dd, (CASE WHEN i.StartDateHospProvSpell < e.ReportingPeriodStartDate THEN e.ReportingPeriodStartDate WHEN i.StartDateHospProvSpell < e.ReferralRequestReceivedDate THEN e.ReferralRequestReceivedDate ELSE i.StartDateHospProvSpell END), 
 	COALESCE(e.ServDischDate,CASE WHEN i.DischDateHospProvSpell < e.ReportingPeriodEndDate THEN i.DischDateHospProvSpell ELSE e.ReportingPeriodEndDate END)) + 1) AS BedDays
 	
 INTO #BedDays
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] i
 
-INNER JOIN #Ref e ON e.RecordNumber = i.RecordNumber
+INNER JOIN #Ref e ON e.Person_ID = i.Person_ID AND e.UniqMonthID = i.UniqMonthID
 
-GROUP BY i.RecordNumber
+GROUP BY e.RecordNumber
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ALL PROCEDURES
@@ -419,13 +455,13 @@ SELECT
 	h.Organisation_Name AS [Provider name],
 	COALESCE(cc.New_Code,r.OrgIDCCGRes, 'Missing / Invalid') AS [CCG code],
 	COALESCE(c.Organisation_Name,'Missing / Invalid') AS [CCG name],
-	ons.CCG20CD AS [CCG ONS code],
+	ons.CCG21CD AS [CCG ONS code],
 	COALESCE(c.STP_Code,'Missing / Invalid') AS [STP code],
 	COALESCE(c.STP_Name,'Missing / Invalid') AS [STP name],
-	ons.STP20CD AS [STP ONS code],
+	ons.STP21CD AS [STP ONS code],
 	COALESCE(c.Region_Code,'Missing / Invalid') AS [Region code],
 	COALESCE(c.Region_Name,'Missing / Invalid') AS [Region name],
-	ons.NHSER20CD AS [Region ONS code],
+	ons.NHSER21CD AS [Region ONS code],
 	r.Person_ID,
 	CASE 
 		WHEN e.Category IS NULL THEN  'Missing / invalid'
@@ -454,48 +490,34 @@ SELECT
 	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 18 AND 35 THEN 1 ELSE 0 END AS [People on the caseload aged 18-35],
 	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate >35 THEN 1 ELSE 0 END AS [People on the caseload aged 36 and over],
 	
-	CASE WHEN r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS [All referrals],
 	CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [New referrals],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [Closed referrals],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferClosReason IN ('02','04') THEN 1 ELSE 0 
-		END AS [Closed referrals - treatment complete / further treatment not appropriate],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferClosReason IN ('01','08') THEN 1 ELSE 0 
-		END AS [Closed referrals - admitted / referred elsewhere],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferClosReason IN ('03','07') THEN 1 ELSE 0 
-		END AS [Closed referrals - person moved / requested discharge],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferClosReason IN ('05','09') THEN 1 ELSE 0 
-		END AS [Closed referrals - DNA / refused to be seen],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND cu.Der_CumulativeContacts IS NOT NULL AND r.ReferClosReason = '08' THEN 1 ELSE 0 
-		END AS [Closed referrals signposted],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND (r.ReferClosReason 
-		NOT IN ('01','02','03','04','05','07','08','09') OR r.ReferClosReason IS NULL) THEN 1 ELSE 0 END AS [Closed referrals - other reason / unknown],
+	CASE WHEN r.ServDischDate IS NOT NULL THEN 1 ELSE 0 END AS [Closed referrals],
+	CASE WHEN r.ServDischDate IS NOT NULL AND r.ReferClosReason IN ('02','04') THEN 1 ELSE 0 END AS [Closed referrals - treatment complete / further treatment not appropriate],
+	CASE WHEN r.ServDischDate IS NOT NULL AND r.ReferClosReason IN ('01','08') THEN 1 ELSE 0 END AS [Closed referrals - admitted / referred elsewhere],
+	CASE WHEN r.ServDischDate IS NOT NULL AND r.ReferClosReason IN ('03','07') THEN 1 ELSE 0 END AS [Closed referrals - person moved / requested discharge],
+	CASE WHEN r.ServDischDate IS NOT NULL AND r.ReferClosReason IN ('05','09') THEN 1 ELSE 0 END AS [Closed referrals - DNA / refused to be seen],
+	CASE WHEN r.ServDischDate IS NOT NULL AND cu.Der_CumulativeContacts IS NOT NULL AND r.ReferClosReason = '08' THEN 1 ELSE 0 END AS [Closed referrals signposted],
+	CASE WHEN r.ServDischDate IS NOT NULL AND (r.ReferClosReason NOT IN ('01','02','03','04','05','07','08','09') OR r.ReferClosReason IS NULL) THEN 1 ELSE 0 END AS [Closed referrals - other reason / unknown],
 
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND cu.Der_CumulativeContacts = 1 THEN 1 ELSE 0 END AS [Closed with one contact],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND cu.Der_CumulativeContacts > 1 THEN 1 ELSE 0 
-		END AS [Closed with two or more contacts],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND (cu.Der_CumulativeContacts IS NULL OR cu.Der_CumulativeContacts = 0) THEN 1 ELSE 0 
-		END AS [No contacts offered / attended],
+	CASE WHEN r.ServDischDate IS NOT NULL AND cu.Der_CumulativeContacts = 1 THEN 1 ELSE 0 END AS [Closed with one contact],
+	CASE WHEN r.ServDischDate IS NOT NULL AND cu.Der_CumulativeContacts > 1 THEN 1 ELSE 0 END AS [Closed with two or more contacts],
+	CASE WHEN r.ServDischDate IS NOT NULL AND (cu.Der_CumulativeContacts IS NULL OR cu.Der_CumulativeContacts = 0) THEN 1 ELSE 0 END AS [No contacts offered / attended],
 
 	-- get referral length for referrals closed in month, inc categories
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 0 and 27 
-		THEN 1 ELSE 0 END AS [Referral length - less than four weeks],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 28 and 182 
-		THEN 1 ELSE 0 END AS [Referral length - one to six months],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 183 AND 365
-		THEN 1 ELSE 0 END AS [Referral length - six to 12 months],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 366 AND 730
-		THEN 1 ELSE 0 END AS [Referral length - one to two years],
-	CASE WHEN r.ReferRejectionDate IS NULL AND r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) > 730
-		THEN 1 ELSE 0 END AS [Referral length - two years or more],
+	CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 0 and 27 THEN 1 ELSE 0 END AS [Referral length - less than four weeks],
+	CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 28 and 182 THEN 1 ELSE 0 END AS [Referral length - one to six months],
+	CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 183 AND 365 THEN 1 ELSE 0 END AS [Referral length - six to 12 months],
+	CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) BETWEEN 366 AND 730 THEN 1 ELSE 0 END AS [Referral length - one to two years],
+	CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ServDischDate) > 730 THEN 1 ELSE 0 END AS [Referral length - two years or more],
 
 	-- get referral not accepted measures, inc duration
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [Referrals not accepted],
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferRejectReason = 02 THEN 1 ELSE 0 END AS [Referrals not accepted - alternative service required],
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferRejectReason = 01 THEN 1 ELSE 0 END AS [Referrals not accepted - duplicate],
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND r.ReferRejectReason = 03 THEN 1 ELSE 0 END AS [Referrals not accepted - incomplete],
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate AND (r.ReferRejectReason NOT IN (01,02,03) OR r.ReferRejectReason IS NULL) THEN 1 ELSE 0 
+	CASE WHEN r.ReferRejectionDate IS NOT NULL THEN 1 ELSE 0 END AS [Referrals not accepted],
+	CASE WHEN r.ReferRejectionDate IS NOT NULL AND r.ReferRejectReason = 02 THEN 1 ELSE 0 END AS [Referrals not accepted - alternative service required],
+	CASE WHEN r.ReferRejectionDate IS NOT NULL AND r.ReferRejectReason = 01 THEN 1 ELSE 0 END AS [Referrals not accepted - duplicate],
+	CASE WHEN r.ReferRejectionDate IS NOT NULL AND r.ReferRejectReason = 03 THEN 1 ELSE 0 END AS [Referrals not accepted - incomplete],
+	CASE WHEN r.ReferRejectionDate IS NOT NULL AND (r.ReferRejectReason NOT IN (01,02,03) OR r.ReferRejectReason IS NULL) THEN 1 ELSE 0 
 		END AS [Referrals not accepted - missing / invalid],
-	CASE WHEN r.ReferRejectionDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ReferRejectionDate) END AS [Referrals not accepted length],
+	CASE WHEN r.ReferRejectionDate IS NOT NULL THEN DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ReferRejectionDate) END AS [Referrals not accepted length],
 
 	-- get days since last contact measures, inc categories, limited to open referrals at month end
 	CASE WHEN r.ServDischDate IS NULL AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS [Time since last contact - less than one week],
@@ -517,41 +539,32 @@ SELECT
 	CASE WHEN b.BedDays >0 THEN 1 ELSE 0 END AS [People who spent time as an inpatient],
 	
 	-- get outcome measures
-	a.HoNOSRecordedOnce AS [HoNOS recorded once],
-	a.HoNOSRecordedMoreThanOnce AS [HoNOS recorded more than once],
-	CASE WHEN a.HoNOSRecordedOnce = 0 THEN 1 ELSE 0 END AS [HoNOS never recorded],
-	a.DIALOGRecordedOnce AS [DIALOG recorded once],
-	a.DIALOGRecordedMoreThanOnce AS [DIALOG recorded more than once],
-	CASE WHEN a.DIALOGRecordedOnce = 0 THEN 1 ELSE 0 END AS [DIALOG never recorded],
-	a.QPRRecordedOnce AS [QPR recorded once],
-	a.QPRRecordedMoreThanOnce AS [QPR recorded more than once],
-	CASE WHEN a.QPRRecordedOnce = 0 THEN 1 ELSE 0 END AS [QPR never recorded],
-	a.TwoMeasuresTwice AS [People with at least 2 outcome measures recorded at least twice],
-	CASE WHEN s.UniqServReqID IS NOT NULL THEN 1 ELSE 0 END AS [Closed referrals with a paired HoNOS],
-	s.BEH_Ini,
-	s.INJ_Ini,
-	s.SUB_Ini,
-	s.COG_Ini,
-	s.ILL_Ini,
-	s.HAL_Ini,
-	s.DEP_Ini,
-	s.OTH_Ini,
-	s.REL_Ini,
-	s.ADL_Ini,
-	s.LIV_Ini,
-	s.OCC_Ini,
-	s.BEH_Fin,
-	s.INJ_Fin,
-	s.SUB_Fin,
-	s.COG_Fin,
-	s.ILL_Fin,
-	s.HAL_Fin,
-	s.DEP_Fin,
-	s.OTH_Fin,
-	s.REL_Fin,
-	s.ADL_Fin,
-	s.LIV_Fin,
-	s.OCC_Fin,
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedMoreThanOnce = 0 THEN a.HoNOSRecordedOnce END AS [HoNOS recorded once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.HoNOSRecordedMoreThanOnce END AS [HoNOS recorded more than once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedOnce = 0 THEN 1 ELSE 0 END AS [HoNOS never recorded],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedMoreThanOnce = 0 THEN a.DIALOGRecordedOnce END AS [DIALOG recorded once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.DIALOGRecordedMoreThanOnce END AS [DIALOG recorded more than once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedOnce = 0 THEN 1 ELSE 0 END AS [DIALOG never recorded],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedMoreThanOnce = 0 THEN a.QPRRecordedOnce END AS [QPR recorded once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.QPRRecordedMoreThanOnce END AS [QPR recorded more than once],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedOnce = 0 THEN 1 ELSE 0 END AS [QPR never recorded],
+	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.TwoMeasuresTwice >0 THEN 1 ELSE 0 END AS [People with at least 2 outcome measures recorded at least twice],
+	--HoNOS initial scores
+	s.BEH_Ini, s.INJ_Ini, s.SUB_Ini, s.COG_Ini, s.ILL_Ini, s.HAL_Ini, s.DEP_Ini, s.OTH_Ini, s.REL_Ini, s.ADL_Ini, s.LIV_Ini, s.OCC_Ini,
+	--DIALOG initial scores
+	s.MEN_Ini, s.PHY_Ini, s.JOB_Ini, s.ACC_Ini, s.LEI_Ini, s.FRD_Ini, s.PRT_Ini, s.SAF_Ini, s.MED_Ini, s.PRA_Ini, s.CON_Ini,
+	-- QPR initial score
+	s.QPR_Ini,
+	-- HoNOS final scores
+	s.BEH_Fin, s.INJ_Fin, s.SUB_Fin, s.COG_Fin, s.ILL_Fin, s.HAL_Fin, s.DEP_Fin, s.OTH_Fin, s.REL_Fin, s.ADL_Fin, s.LIV_Fin, s.OCC_Fin,
+	--DIALOG final scores
+	s.MEN_Fin, s.PHY_Fin, s.JOB_Fin, s.ACC_Fin, s.LEI_Fin, s.FRD_Fin, s.PRT_Fin, s.SAF_Fin, s.MED_Fin, s.PRA_Fin, s.CON_Fin,
+	--QPR final score
+	s.QPR_Fin,
+	
+	CASE WHEN s.PairedHoNOS >= 1 THEN 1 ELSE 0 END AS [Closed referrals with a paired HoNOS],
+	CASE WHEN s.PairedDialog >= 1 THEN 1 ELSE 0 END AS [Closed referrals with a paired DIALOG],
+	CASE WHEN s.PairedQPR >= 1 THEN 1 ELSE 0 END AS [Closed referrals with a paired QPR],
 	
 	-- get aggregate SNoMED measures
 	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND p.AnySNoMED > 0 THEN 1 ELSE 0 END AS [Referrals with any SNoMED codes],
@@ -577,13 +590,13 @@ LEFT JOIN [NHSE_UKHF].[Data_Dictionary].[vw_Ethnic_Category_Code_SCD] e ON r.Eth
 
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_DataDic_ZZZ_PersonGender] g ON r.Gender = g.Person_Gender_Code
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies h ON r.OrgIDProv = h.Organisation_Code
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = c.Organisation_Code
 
-LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Reference_ONS_CCG_lkp] ons ON ons.CCG20CDH = COALESCE(cc.New_Code,r.OrgIDCCGRes) 
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Reference_ONS_CCG_lkp] ons ON ons.CCG21CDH = COALESCE(cc.New_Code,r.OrgIDCCGRes) 
 
 LEFT JOIN #Agg ag ON ag.RecordNumber = r.RecordNumber AND ag.UniqServReqID = r.UniqServReqID
 
@@ -650,7 +663,6 @@ SELECT
 	SUM([People on the caseload aged 18-35]) AS [People on the caseload aged 18-35],
 	SUM([People on the caseload aged 36 and over]) AS [People on the caseload aged 36 and over],
 	
-	SUM([All referrals]) AS [All referrals],
 	SUM([New referrals]) AS [New referrals],
 	SUM([Closed referrals]) AS [Closed referrals],
 	SUM([Closed referrals - treatment complete / further treatment not appropriate]) AS [Closed referrals - treatment complete / further treatment not appropriate],
@@ -702,8 +714,11 @@ SELECT
 	SUM([QPR recorded once]) AS [QPR recorded once],
 	SUM([QPR recorded more than once]) AS [QPR recorded more than once],
 	SUM([QPR never recorded]) AS [QPR never recorded],
-	SUM([People with at least 2 outcome measures recorded at least twice]) AS [Referrals with two outcome measures recorded more than once],
+	SUM([People with at least 2 outcome measures recorded at least twice]) AS [People with at least 2 outcome measures recorded at least twice],
 	SUM([Closed referrals with a paired HoNOS]) AS [Closed referrals with a paired HoNOS],
+	SUM([Closed referrals with a paired DIALOG]) AS [Closed referrals with a paired DIALOG],
+	SUM([Closed referrals with a paired QPR]) AS [Closed referrals with a paired QPR],
+	
 	SUM(BEH_Ini) AS [BEH initial],
 	SUM(INJ_Ini) AS [INJ initial],
 	SUM(SUB_Ini) AS [SUB initial],
@@ -716,6 +731,21 @@ SELECT
 	SUM(ADL_Ini) AS [ADL initial],
 	SUM(LIV_Ini) AS [LIV initial],
 	SUM(OCC_Ini) AS [OCC initial],
+
+	SUM(MEN_Ini) AS [MEN initial],
+	SUM(PHY_Ini) AS [PHY initial],
+	SUM(JOB_Ini) AS [JOB initial],
+	SUM(ACC_Ini) AS [ACC initial],
+	SUM(LEI_Ini) AS [LEI initial],
+	SUM(FRD_Ini) AS [FRD initial],
+	SUM(PRT_Ini) AS [PRT initial],
+	SUM(SAF_Ini) AS [SAF initial],
+	SUM(MED_Ini) AS [MED initial],
+	SUM(PRA_Ini) AS [PRA initial],
+	SUM(CON_Ini) AS [CON initial],
+	
+	SUM(QPR_Ini) AS [QPR initial],
+	
 	SUM(BEH_Fin) AS [BEH final],
 	SUM(INJ_Fin) AS [INJ final],
 	SUM(SUB_Fin) AS [SUB final],
@@ -729,11 +759,27 @@ SELECT
 	SUM(LIV_Fin) AS [LIV final],
 	SUM(OCC_Fin) AS [OCC final],
 	
+	SUM(MEN_Fin) AS [MEN final],
+	SUM(PHY_Fin) AS [PHY final],
+	SUM(JOB_Fin) AS [JOB final],
+	SUM(ACC_Fin) AS [ACC final],
+	SUM(LEI_Fin) AS [LEI final],
+	SUM(FRD_Fin) AS [FRD final],
+	SUM(PRT_Fin) AS [PRT final],
+	SUM(SAF_Fin) AS [SAF final],
+	SUM(MED_Fin) AS [MED final],
+	SUM(PRA_Fin) AS [PRA final],
+	SUM(CON_Fin) AS [CON final],
+	
+	SUM(QPR_Fin) AS [QPR final],
+	
 	SUM([Referrals with any SNoMED codes]) AS [Referrals with any SNoMED codes],
 	SUM([Referrals with NICE concordant SNoMED codes]) AS [Referrals with NICE concordant SNoMED codes],
 
 	-- duplicate measures for denominator in tableau
 	SUM([Closed referrals with a paired HoNOS]) AS [Closed referrals with a paired HoNOS2],
+	SUM([Closed referrals with a paired DIALOG]) AS [Closed referrals with a paired DIALOG2],
+	SUM([Closed referrals with a paired QPR]) AS [Closed referrals with a paired QPR2],
 	SUM([Total caseload]) AS [Caseload2]
 
 INTO #AggMainDash
@@ -805,7 +851,7 @@ SELECT
 	[Age category],
 	'MHSDS - Activity' AS [Data source],
 	'Core Dashboard' AS [Dashboard type],
-	NULL AS Breakdown,
+	'ENGLAND' AS Breakdown,
 	NULL AS [Breakdown category],
 	MeasureName,
 	MeasureValue,
@@ -813,7 +859,30 @@ SELECT
 		WHEN MeasureName LIKE '%SNoMED codes' THEN [Caseload2]
 		WHEN MeasureName LIKE '%recorded%' THEN [Caseload2]
 		WHEN MeasureName = 'Days spent as an inpatient' THEN [People who spent time as an inpatient]
-		WHEN MeasureName LIKE '%initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'BEH initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'INJ initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'SUB initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'COG initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'ILL initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'HAL initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'DEP initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'OTH initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'REL initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'ADL initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'LIV initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'OCC initial' THEN [Closed referrals with a paired HoNOS2]
+		WHEN MeasureName = 'MEN initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'PHY initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'JOB initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'ACC initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'LEI initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'FRD initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'PRT initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'SAF initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'MED initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'PRA initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'CON initial' THEN [Closed referrals with a paired DIALOG2]
+		WHEN MeasureName = 'QPR initial' THEN [Closed referrals with a paired QPR2]
 	END AS Denominator,
 	CASE
 		WHEN MeasureName = 'BEH initial' THEN [BEH final]
@@ -828,7 +897,19 @@ SELECT
 		WHEN MeasureName = 'ADL initial' THEN [ADL final]
 		WHEN MeasureName = 'LIV initial' THEN [LIV final]
 		WHEN MeasureName = 'OCC initial' THEN [OCC final]
-	END AS UpperLimit,
+		WHEN MeasureName = 'MEN initial' THEN [MEN final]
+		WHEN MeasureName = 'PHY initial' THEN [PHY final]
+		WHEN MeasureName = 'JOB initial' THEN [JOB final]
+		WHEN MeasureName = 'ACC initial' THEN [ACC final]
+		WHEN MeasureName = 'LEI initial' THEN [LEI final]
+		WHEN MeasureName = 'FRD initial' THEN [FRD final]
+		WHEN MeasureName = 'PRT initial' THEN [PRT final]
+		WHEN MeasureName = 'SAF initial' THEN [SAF final]
+		WHEN MeasureName = 'MED initial' THEN [MED final]
+		WHEN MeasureName = 'PRA initial' THEN [PRA final]
+		WHEN MeasureName = 'CON initial' THEN [CON final]
+		WHEN MeasureName = 'QPR initial' THEN [QPR final]
+		END AS UpperLimit,
 	NULL AS LowerLimit
 
 FROM #AggMainDash 
@@ -846,9 +927,10 @@ UNPIVOT (MeasureValue FOR MeasureName IN
 	[Cancelled contacts],[Indirect contacts],[Unknown / Invalid attendance code],[Face to face contacts],[Telephone contacts],[Contacts via other mediums],[Unknown / Invalid consultation medium],[Days spent as an inpatient],
 	
 	[HoNOS recorded once],[HoNOS recorded more than once],[HoNOS never recorded],[DIALOG recorded once],[DIALOG recorded more than once],[DIALOG never recorded],[QPR recorded once],[QPR recorded more than once],[QPR never recorded],
-	[Referrals with two outcome measures recorded more than once],
+	[People with at least 2 outcome measures recorded at least twice],
 
-	[Closed referrals with a paired HoNOS],[BEH initial],[INJ initial],[SUB initial],[COG initial],[ILL initial],[HAL initial],[DEP initial],[OTH initial],[REL initial],[ADL initial],[LIV initial],[OCC initial],[Referrals with any SNoMED codes],[Referrals with NICE concordant SNoMED codes])) u
+	[Closed referrals with a paired HoNOS],[BEH initial],[INJ initial],[SUB initial],[COG initial],[ILL initial],[HAL initial],[DEP initial],[OTH initial],[REL initial],[ADL initial],[LIV initial],[OCC initial],
+	[MEN initial],[PHY initial],[JOB initial],[ACC initial],[LEI initial],[FRD initial],[PRT initial],[SAF initial],[MED initial],[PRA initial],[CON initial],[QPR initial],[Referrals with any SNoMED codes],[Referrals with NICE concordant SNoMED codes])) u
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 
@@ -1010,7 +1092,7 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 
 SELECT
 	ReportingPeriodEndDate,
-	'ENGLAND' AS [Local team identifier],
+	NULL AS [Local team identifier],
 	NULL AS [Provider code],
 	NULL AS [Provider name],
 	NULL AS [CCG code],
@@ -1241,3 +1323,20 @@ SELECT
 FROM #AWTNewCCG a
 
 UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+MANUALLY AMEND MHSDS ORG NAMES TO MATCH THOSE IN
+THE NCAP AUDIT
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+UPDATE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
+
+SET [Provider name] = 'FORWARD THINKING BIRMINGHAM'
+
+WHERE [Provider code] = 'RQ3'
+
+UPDATE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
+
+SET [Provider name] = 'INSIGHT TEAM, PLYMOUTH'
+
+WHERE [Provider code] IN ('NR5','NKD')
