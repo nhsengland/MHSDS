@@ -198,6 +198,7 @@ INTO #ActivitiesTEWV
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a -- Select activities info from PreProc Activity table...
 INNER JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions i ON a.RecordNumber = i.RecordNumber AND a.UniqCareContID = i.UniqCareContID AND i.Der_SNoMEDProcCode IN ('1082621000000104', '772822000')
 WHERE a.OrgIDProv = 'RX3' -- ... only for IPS activities at TEWV using SNoMED code
+AND a.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
 
 INSERT INTO #Activities -- Insert TEWV activities info below into #Activities table created above
 
@@ -206,7 +207,7 @@ SELECT
 	a.UniqMonthID,
 	a.Person_ID,
 	a.UniqServReqID,
-	NULL AS ContactOrder, -- All TEWV referrals have accessed IPS as we only know about those that have a contact (so all will be in caseload)
+	1 AS ContactOrder, -- All TEWV referrals have accessed IPS as we only know about those that have a contact (so all will be in caseload, just give a value of 1 so they are counted in the caseload)
 	MIN(a.AccessFlag) AS AccessFlag, -- As we don't have Der_DirectContactOrder, identify first contact as access flag
 	MIN(a.FYAccessFlag) AS FYAccessFlag, -- As we don't have Der_FYDirectContactOrder, identify first contact of the financial year as FY access flag
 	MIN(a.Der_ContactDate) AS AccessDate, -- For now, all contacts have their date listed - will be turned into the access date in the master where AccessFlag = 1 
@@ -239,14 +240,16 @@ GROUP BY a.UniqServReqID, a.Person_ID -- Group by ONLY referral, ignoring month
 INSERT INTO #ActPerRef
 
 SELECT
-	a.Person_ID,
-	a.UniqServReqID,
-	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL THEN 1 ELSE 0 END) AS TotalContactsPerReferral, -- Calcuate total contacts for each referral
-	MIN(a.Der_ContactDate) AS AccessDatePerReferral -- Find the date of the first contact for each referral
-FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions a
-INNER JOIN (SELECT DISTINCT r.Person_ID, r.UniqServReqID FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Referral r GROUP BY r.Person_ID, r.UniqServReqID) r ON a.Person_ID = r.Person_ID AND a.UniqServReqID = r.UniqServReqID -- Select distinct referrals at TEWV who have IPS activities
-WHERE a.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND a.OrgIDProv = 'RX3'
-GROUP BY a.UniqServReqID, a.Person_ID
+	i.Person_ID,
+	i.UniqServReqID,
+	SUM(CASE WHEN i.Der_SNoMEDProcCode IS NOT NULL THEN 1 ELSE 0 END) AS TotalContactsPerReferral, -- Calcuate total contacts for each referral
+	MIN(i.Der_ContactDate) AS AccessDatePerReferral -- Find the date of the first contact for each referral
+FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions i
+INNER JOIN (SELECT DISTINCT r.Person_ID, r.UniqServReqID FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Referral r GROUP BY r.Person_ID, r.UniqServReqID) r ON i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID -- Select distinct referrals at TEWV who have IPS activities
+LEFT JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a ON a.RecordNumber = i.RecordNumber AND a.UniqCareContID = i.UniqCareContID
+WHERE i.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND i.OrgIDProv = 'RX3'
+AND a.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
+GROUP BY i.UniqServReqID, i.Person_ID
 
 ---------- Create outcomes temp table ----------
 
