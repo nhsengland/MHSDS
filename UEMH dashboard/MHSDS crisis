@@ -88,7 +88,6 @@ SELECT
 	,r.PrimReasonReferralMH
 	,CASE WHEN r.PrimReasonReferralMH = '15' THEN 1 ELSE 0 END as SelfHarm_PrimReason
 	,ROW_NUMBER()OVER(PARTITION BY r.Person_ID, r.UniqServreqID ORDER BY r.UniqMonthID DESC) AS Ref_RN
-	,ROW_NUMBER() OVER(PARTITION BY r.Person_ID, r.UniqServReqID, r.UniqMOnthID ORDER BY r.MHS102UniqID DESC) AS MHS102_RN ---- partition to get one MHS102 record per referral (for testing only)
 
 INTO #Refs
 
@@ -145,124 +144,7 @@ LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a1 ON r.Person_ID = a1.
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a2 ON r.Person_ID = a2.Person_ID AND r.UniqServReqID = a2.UniqServReqID AND r.UniqCareProfTeamID = a2.Der_UniqCareProfTeamID
 	AND a2.Der_DirectContactOrder = 1 ---- to get first direct contact 
 
-WHERE  r.Ref_RN = 1 AND r.MHS102_RN = 1  AND r.NewRef = 1
-
-
-
-
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-GET ALL CONTACTS RECORDED AGAINST CRISIS AND LIAISON REFERRALS
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-IF OBJECT_ID ('tempdb..#CrisisContacts') IS NOT NULL
-DROP TABLE #CrisisContacts
-
-SELECT 
-	r.UniqServReqID
-	,r.UniqCareProfTeamID
-	,r.Person_ID
-	,r.Provider_Code
-	,r.Provider_Name
-	,r.CCGCode
-	,r.[CCG name]
-	,r.STPCode
-	,r.[STP name]
-	,r.Region_Code
-	,r.Region_Name
-	,r.AgeCat
-	,r.ReferralRequestReceivedDate
-	,r.ReferralRequestReceivedTime
-	,r.ReferralRequestReceivedDateTime
-	,r.ReportingPeriodStartDate
-	,r.ReportingPeriodEndDate
-	,r.TeamType 
-	,r.TeamTypeCat
-	,r.RefSource
-	,r.RefSourceSimplified
-	,r.ClinRespPriority
-	,c.Der_ActivityUniqID
-	,c.Der_ActivityType
-	,c.Der_ContactDate
-	,DATEADD(MONTH, DATEDIFF(MONTH, 0, c.Der_ContactDate), 0) AS Cont_MonthYear
-	,CASE WHEN c.Der_ContactDate >= @RP_ENDDATE_START THEN 'Primary' ELSE NULL END as PrimaryFlag
-	,CASE WHEN c.Der_FacetoFaceContactOrder =1 THEN 1 ELSE 0 END as FirstContact 
-	,c.AttendOrDNACode
-	,CASE
-		WHEN c.AttendOrDNACode IN ('5','6') THEN 'Attended' 
-		WHEN c.AttendOrDNACode IN ('7','2','3','4') THEN 'DNA' 
-		ELSE 'Missing/Invalid' 
-	END as 'AttendanceCode'
-	,CASE 
-		WHEN c.ConsMediumUsed = '01' THEN 'F2F' 
-		WHEN c.ConsMediumUsed = '02' THEN 'Telephone' 
-		WHEN c.ConsMediumUsed = '03' THEN 'Telemedicine' 
-		WHEN c.ConsMediumUsed = '04' THEN 'Talk Type for person unable to speak' 
-		WHEN c.ConsMediumUsed = '05' THEN 'Email' 
-		WHEN c.ConsMediumUsed = '06' THEN 'SMS' 
-		WHEN c.ConsMediumUsed = '98' THEN 'Other' 
-		ELSE 'Missing/Invalid' 
-	END as 'ConsMediumCode' 
-
-INTO #CrisisContacts
-
-FROM #Refs r 
-
-INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity c ON r.Person_ID = c.Person_ID  AND r.UniqServReqID = c.UniqServReqID AND r.UniqCareProfTeamID = c.Der_UniqCareProfTeamID 
-
-WHERE r.Ref_RN = 1 AND r.MHS102_RN = 1  AND r.NewRef = 1
-AND c.Der_ActivityType = 'DIRECT' --- direct contacts only 
-AND c.Der_ContactDate >= @RP_STARTDATE
-
-
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-GET A&E ATTENDANCES FOR ACTIVE CRISIS REFERRALS  
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-IF OBJECT_ID ('tempdb..#Attendances') IS NOT NULL
-DROP TABLE #Attendances
-
-SELECT
-	r.UniqServReqID
-	,r.Person_ID
-	,r.Der_Pseudo_NHS_Number 
-	,r.Provider_Code 
-	,r.UniqMonthID
-	,r.ReportingPeriodStartDate
-	,r.ReportingPeriodEndDate 
-	,r.TeamType
-	,r.AgeCat
-	,r.ReferralRequestReceivedDateTime 
-	,c.Direct_ContactDate
-	,a.Generated_Record_ID
-	,a.Der_Provider_Code
-	,Arrival_Date
-	,CAST(ISNULL(a.Arrival_Time,'00:00:00') AS datetime) + CAST(a.Arrival_Date AS datetime) AS ArrivalDateTime
-	,ROW_NUMBER() OVER(PARTITION BY r.UniqServReqID, r.Der_Pseudo_NHS_Number, r.UniqMonthID ORDER BY a.Arrival_date, a.Arrival_Time) AS RN
-
-INTO #Attendances
-
-FROM #Refs r 
-
-JOIN #FirstCont c ON r.UniqServReqID = c.UniqServReqID ANd r.Person_ID = c.Person_ID AND c.F2F_ActivityUniqID IS NOT NULL ---- only people who have had a F2F contact
-
-JOIN [NHSE_SUSPlus_Live].[dbo].[tbl_Data_SUS_EC] a 
-	ON r.Der_Pseudo_NHS_Number = a.Der_Pseudo_NHS_Number 
-	AND a.Arrival_Date BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate 
-	AND a.Arrival_Date BETWEEN r.ReferralRequestReceivedDate AND ISNULL(r.ServDischDate,r.ReportingPeriodEndDate)
-	AND (a.Arrival_Time > r.ReferralRequestReceivedTime OR r.ReferralRequestReceivedTime IS NULL) 
-
-	AND a.EC_Department_Type = '01' --- Type 1 EDs only 
-	AND a.Der_Dupe_Flag = 0  
-	AND (EC_Chief_Complaint_SNOMED_CT IN ('248062006','272022009','48694002','248020004','7011001') --- MH related attendances
-			OR EC_Injury_Intent_SNOMED_CT = '276853009' 
-			OR COALESCE(LEFT(Der_EC_Diagnosis_All, NULLIF(CHARINDEX(',',Der_EC_Diagnosis_All),0)-1),Der_EC_Diagnosis_All) 
-				IN ('52448006','2776000','33449004','72366004','197480006','13746004','58214004','69322001','397923000','30077003','44376007','17226007','50705009')
-		)
-
-WHERE  r.MHS102_RN = 1 --- remove duplicates
-AND r.Ref_RN = 1 
+WHERE  r.Ref_RN = 1 AND r.NewRef = 1
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -309,10 +191,6 @@ SELECT
 	,f.Direct_RespTime
 	,f.F2F_ActivityUniqID
 	,f.F2F_RespTime 
-	--,ISNULL(ad.Admission,0) AS Month_Admission_all
-	--,ISNULL(ad.CRT_Admission,0) AS Month_CRT_Admission
-	--,ISNULL(ad.ED_Admission,0) AS Month_ED_Admission
-	,ISNULL(ae.Attendance,0) AS Month_Attendance
 
 INTO #Master
 
@@ -320,18 +198,9 @@ FROM #Refs r
 
 LEFT JOIN #FirstCont f ON r.UniqServReqID = f.UniqServReqID AND r.Person_ID = f.Person_ID 
 
-LEFT JOIN 
-	(SELECT UniqServReqID, Person_ID, UniqMonthID, 1 AS Attendance, COUNT(*) as Attendances --- added 1 to only count one attendance per referral per month 
-	FROM #Attendances 
-	GROUP BY UniqServReqID, Person_ID, UniqMonthID 
-	) ae 
-	ON r.UniqServReqID = ae.UniqServReqID AND r.Person_ID = ae.Person_ID AND r.UniqMonthID = ae.UniqMonthID 
-
-
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o ON r.Provider_Code = o.Organisation_Code
 		
-WHERE  r.MHS102_RN = 1 --- remove duplicates
-AND r.Ref_RN = 1 
+WHERE  r.Ref_RN = 1 
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -377,85 +246,6 @@ WHERE NewRef = 1
 GROUP BY Ref_MonthYear, PrimaryFlag, Provider_Code, Provider_Name, CCGCode, [CCG name], STPCode, [STP name], Region_Code, Region_Name, TeamTypeCat, TeamType, ClinRespPriority, RefSourceSimplified, AgeCat,
 Prov_Region_Code, Prov_Region_Name, Prov_STP_Code, Prov_STP_Name
 
-
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-AGGREGATE CARE CONTACT INFORMATION 
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-IF OBJECT_ID ('tempdb..#Agg_Contacts') IS NOT NULL
-DROP TABLE #Agg_Contacts
-
-SELECT 
-	c.Cont_MonthYear AS ReportingPeriod 
-	,c.PrimaryFlag
-	,c.Provider_Code
-	,c.Provider_Name
-	,c.CCGCode
-	,c.[CCG name]
-	,c.STPCode
-	,c.[STP name]
-	,c.Region_Code
-	,c.Region_Name
-	,o.Region_Code AS Prov_Region_Code
-	,o.Region_Name AS  Prov_Region_Name
-	,o.STP_Code AS Prov_STP_Code
-	,o.STP_Name AS Prov_STP_Name
-	,TeamTypeCat
-	,TeamType
-	,ClinRespPriority 
-	,RefSourceSimplified
-	,AgeCat
-	,COUNT(*) as TotalContacts 
-	,COUNT(*) as Denom_contacts
-	,SUM(CASE WHEN AttendanceCode = 'Attended' THEN 1 ELSE 0 END) as Contact_Attended
-	,SUM(CASE WHEN AttendanceCode = 'DNA' THEN 1 ELSE 0 END) as Contact_DNA
-	,SUM(CASE WHEN AttendanceCode = 'Missing/Invalid' THEN 1 ELSE 0 END) as Contact_nullDNA
-	,SUM(CASE WHEN ConsMediumCode = 'F2F' THEN 1 ELSE 0 END) as Contact_F2F
-	,SUM(CASE WHEN ConsMediumCode = 'Telephone' THEN 1 ELSE 0 END) as Contact_Telephone
-	,SUM(CASE WHEN ConsMediumCode = 'Email' THEN 1 ELSE 0 END) as Contact_Email
-	,SUM(CASE WHEN ConsMediumCode = 'Telemedicine' THEN 1 ELSE 0 END) as Contact_Telemedicine
-	,SUM(CASE WHEN ConsMediumCode = 'Talk Type for person unable to speak' THEN 1 ELSE 0 END) as Contact_TalkType
-	,SUM(CASE WHEN ConsMediumCode = 'SMS' THEN 1 ELSE 0 END) as Contact_SMS
-	,SUM(CASE WHEN ConsMediumCode = 'Other' THEN 1 ELSE 0 END) as Contact_OtherMedium
-	,SUM(CASE WHEN ConsMediumCode = 'Missing/Invalid' THEN 1 ELSE 0 END) as Contact_NullMedium
-
-INTO #Agg_Contacts
-
-FROM #CrisisContacts c
-
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o ON c.Provider_Code = o.Organisation_Code
-	
-GROUP BY Cont_MonthYear, PrimaryFlag, Provider_Code, Provider_Name, CCGCode, [CCG name], STPCode, [STP name], c.Region_Code, c.Region_Name, TeamTypeCat, TeamType, ClinRespPriority, RefSourceSimplified, AgeCat,
-o.Region_Code, o.Region_Name, o.STP_Code, o.STP_Name
-
-
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-ADD CCG POPULATIONS (BASED ON  GP REGISTERED POPULATION)
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-IF OBJECT_ID ('tempdb..#Population') IS NOT NULL
-DROP TABLE #Population
-
-
- SELECT 
-	Commissioner_Code 
-	,cc.Org_Code
-	,cc.New_Code
-	,Effective_Snapshot_Date
-	,SUM(size) as [Population]
-	,ROW_NUMBER()OVER(PARTITION BY Commissioner_Code ORDER BY Effective_Snapshot_Date DESC) AS RN 
-
-INTO #Population
-
-FROM [NHSE_UKHF].[Demography].[vw_No_Of_Patients_Regd_At_GP_Prac_Commissioner_Level1] a 
-
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON a.Commissioner_Code COLLATE DATABASE_DEFAULT = cc.Org_Code COLLATE DATABASE_DEFAULT
- 
-GROUP BY Commissioner_Code, Effective_Snapshot_Date, cc.Org_Code, cc.New_Code
-
-
  
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ADD RELEVANT DENOMINATORS 
@@ -493,26 +283,10 @@ SELECT
 	-- denominators
 	,NewRefs as Denom_contact
 	,F2F_Contact as Denom_resp_times
-	,CAST(p1.[MH Weighted population] as INT) as [MH Weighted population]
-	,CAST(p2.[Population] AS INT) AS [Registered population]
 
 INTO #Denoms_NewRefs
 
 FROM #Agg_NewRefs a
-
-LEFT JOIN NHSE_Sandbox_MentalHealth.[dbo].[Reference_MH_wt_population] p1 ON a.CCGCode = p1.[CCG code] 
-
-LEFT JOIN 
-	( 
-	SELECT 
-	ISNULL(NEw_Code, Commissioner_Code) AS CCG_Code
-	,SUM([Population]) AS [Population]
-	FROM #Population 
-	 WHERE RN = 1 
-	GROUP BY ISNULL(NEw_Code, Commissioner_Code)  
-	) p2 ON a.CCGCode = p2.CCG_Code 
-
-
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -548,8 +322,6 @@ SELECT
 		WHEN MeasureName IN ('F2F_Contact', 'Direct_Contact') THEN Denom_contact 
 		WHEN MeasureName IN ('F2F_RespTime','F2F_1hr','F2F_4hr','F2F_24hr') THEN Denom_resp_times
 	END as Denominator 
-	,[MH Weighted population]
-	,[Registered population]
 
 INTO #Output
 
@@ -558,36 +330,3 @@ FROM #Denoms_NewRefs
 UNPIVOT (MeasureValue FOR MeasureName IN 
 		(NewRefs, F2F_Contact, Direct_Contact, F2F_1hr, F2F_4hr, F2F_24hr)) u 
 
-UNION ALL 
-
-SELECT 
-	ReportingPeriod
-	,PrimaryFlag
-	,Provider_Code
-	,Provider_Name
-	,CCGCode
-	,[CCG name]
-	,STPCode
-	,[STP name]
-	,Region_Code
-	,Region_Name
-	,Prov_Region_Code
-	,Prov_Region_Name
-	,Prov_STP_Code
-	,Prov_STP_Name
-	,TeamTypeCat
-	,TeamType
-	,ClinRespPriority
-	,RefSourceSimplified
-	,AgeCat
-	,MeasureName
-	,MeasureValue
-	,Denom_contacts 
-	,NULL AS [MH Weighted population]
-	,NULL AS [Registered population]
-
-FROM #Agg_Contacts 
-
-UNPIVOT (MeasureValue FOR MeasureName IN 
-		(TotalContacts, Contact_Attended, Contact_DNA, Contact_nullDNA,
-		Contact_F2F, Contact_Telephone, Contact_Email, Contact_Telemedicine, Contact_TalkType, Contact_SMS, Contact_OtherMedium, Contact_NullMedium)) u 
