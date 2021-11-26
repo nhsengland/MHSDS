@@ -117,7 +117,7 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o3 ON COALESCE
 
 WHERE Der_Dupe_Flag = 0 --- remove duplicates (check this actually works)  
 AND a.EC_Department_Type = '01' --- Type 1 EDs only 
-AND a.Arrival_Date BETWEEN @RP_STARTDATE AND @RP_ENDDATE ---- have tried to keep the reporting period consistent with the MHSDS, might need to change
+AND a.Arrival_Date >= @RP_STARTDATE
 
 
 
@@ -170,7 +170,7 @@ SELECT
 	,DiagnosisDescription
 	,Age_At_Arrival 
 	,AgeCat 
-	,Val_ChiefComplaint --- NOTE: check this are aligned with other ECDS DQ reporting !!
+	,Val_ChiefComplaint
 	,InjuryFlag
 	,Val_InjuryIntent
 	,Val_Diagnosis
@@ -237,33 +237,6 @@ WHERE Region_Name <> 'WALES REGION'
 
 GROUP BY MonthYear, Der_Provider_Site_Code_cleaned, Der_Provider_Site_Name_cleaned, Der_Provider_Code, Der_Provider_Name, CCGCode, [CCG name], STPCode, [STP name], Region_Code, Region_Name, AgeCat, OutOfHours
 
-
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-ADD CCG POPULATIONS (BASED ON  GP REGISTERED POPULATION)
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-IF OBJECT_ID ('tempdb..#Population') IS NOT NULL
-DROP TABLE #Population
-
-
- SELECT 
-	Commissioner_Code 
-	,cc.Org_Code
-	,cc.New_Code
-	,Effective_Snapshot_Date
-	,SUM(size) as [Population]
-	,ROW_NUMBER()OVER(PARTITION BY Commissioner_Code ORDER BY Effective_Snapshot_Date DESC) AS RN 
-
-INTO #Population
-
-FROM [NHSE_UKHF].[Demography].[vw_No_Of_Patients_Regd_At_GP_Prac_Commissioner_Level1] a 
-
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON a.Commissioner_Code COLLATE DATABASE_DEFAULT = cc.Org_Code COLLATE DATABASE_DEFAULT
- 
- GROUP BY Commissioner_Code, Effective_Snapshot_Date, cc.Org_Code, cc.New_Code
-
-
  
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -319,20 +292,6 @@ INTO #Denoms
 
 FROM #Agg a
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.[dbo].[Reference_MH_wt_population] p1 ON a.CCGCode = p1.[CCG code] 
-
-LEFT JOIN 
-	( 
-	SELECT 
-	ISNULL(NEw_Code, Commissioner_Code) AS CCG_Code
-	,SUM([Population]) AS [Population]
-	FROM #Population 
-	 WHERE RN = 1 
-	GROUP BY ISNULL(NEw_Code, Commissioner_Code)  
-	) p2 ON a.CCGCode = p2.CCG_Code 
-
-
-
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 UNPIVOT FOR FINAL OUTPUT 
@@ -378,8 +337,6 @@ SELECT
 		WHEN MeasureName = 'MH_APD_6hrs' THEN Denom_All_Breach6hrs 
 		WHEN MeasureName = 'MH_APD_12hrs' THEN Denom_All_Breach12hrs 
 	END AS Denominator_alt
-	,[MH Weighted population]
-	,[Registered population]
 
 INTO #Output
 
