@@ -8,7 +8,7 @@ CREATED BY CARL MONEY 24/08/2020
 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
---SET VARIABLES
+----SET VARIABLES
 
 DECLARE @StartRP INT
 
