@@ -93,7 +93,9 @@ SELECT
 	a.UniqServReqID
 INTO #TEWVIPS 
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions a 
+LEFT JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity p ON a.RecordNumber = p.RecordNumber AND a.UniqCareContID = p.UniqCareContID
 WHERE a.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND a.OrgIDProv = 'RX3' -- Select all interventions/activity data for TEWV referrals with IPS SNoMED codes
+AND p.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
 GROUP BY a.RecordNumber, a.UniqServReqID
 
 INSERT INTO #Referrals -- Insert TEWV referrals below into #Referrals table created above
