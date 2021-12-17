@@ -1,0 +1,155 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+A&E WAITS 12 HOUR BREACHES FOR MH PATIENTS
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+IF OBJECT_ID ('tempdb..#a_e_breach_cdp') IS NOT NULL
+DROP TABLE #a_e_breach_cdp
+
+--Finds most recent performance data and sets as end date
+DECLARE @RPEnd as DATE
+SET @RPEnd = eomonth((select DATEADD(mm, -1, MAX(MonthYear)) from NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS))
+
+--Sets Start date as 12 months prior to end date
+DECLARE @RPStart as Date
+SET @RPStart = eomonth((SELECT DATEADD(mm,-12,@RPEnd)))
+
+print @RPStart
+print @RPEnd
+
+--Pulls all MH A&E Breaches data in time period specified
+
+SELECT 
+	'England' AS Breakdown 
+	,'Eng' AS OrgCode 
+	,'England' AS OrgName 
+	,eomonth( MonthYear) as [Month] 
+	,AgeCat
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN Denominator ELSE 0 END) AS MH_Attendances
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN MeasureValue ELSE 0 END) AS MH_Breach12hrs 
+
+into #a_e_breach_cdp
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS 
+WHERE MonthYear between @RPStart and @RPEnd
+GROUP BY MonthYear, AgeCat
+
+UNION ALL 
+
+SELECT 
+	'Region' AS Breakdown 
+	,Region_Code AS OrgCode 
+	,Region_Name AS OrgName 
+	,eomonth( MonthYear) as [Month] 
+	,AgeCat
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN Denominator ELSE 0 END) AS MH_Attendances
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN MeasureValue ELSE 0 END) AS MH_Breach12hrs 
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS 
+WHERE MonthYear between @RPStart and @RPEnd
+GROUP BY Region_Code, Region_Name, MonthYear, AgeCat
+
+UNION ALL 
+
+SELECT 
+	'STP' AS Breakdown 
+	,STPCode AS OrgCode 
+	,[STP name] AS OrgName 
+	,eomonth( MonthYear) as [Month] 
+	,AgeCat
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN Denominator ELSE 0 END) AS MH_Attendances
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN MeasureValue ELSE 0 END) AS MH_Breach12hrs 
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS 
+WHERE MonthYear between @RPStart and @RPEnd
+GROUP BY STPCode, [STP name], MonthYear, AgeCat
+
+UNION ALL 
+
+SELECT 
+	'CCG' AS Breakdown 
+	,CCGCode AS OrgCode 
+	,[CCG name] AS OrgName 
+	,eomonth( MonthYear) as [Month] 
+	,AgeCat
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN Denominator ELSE 0 END) AS MH_Attendances
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN MeasureValue ELSE 0 END) AS MH_Breach12hrs 
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS 
+WHERE MonthYear between @RPStart and @RPEnd
+GROUP BY CCGCode, [CCG name], MonthYear, AgeCat
+
+UNION ALL 
+
+SELECT 
+	'Provider' AS Breakdown 
+	,Der_Provider_Code AS OrgCode 
+	,Der_Provider_Name AS OrgName 
+	,eomonth( MonthYear) as [Month] 
+	,AgeCat
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN Denominator ELSE 0 END) AS MH_Attendances
+	,SUM(CASE WHEN MeasureName = 'MH_Breach12hrs' THEN MeasureValue ELSE 0 END) AS MH_Breach12hrs 
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_UEC_ECDS 
+WHERE MonthYear between @RPStart and @RPEnd
+GROUP BY Der_Provider_Code, Der_Provider_Name, MonthYear, AgeCat
+
+--Aggregates data into CYP and Adult age groups
+
+IF OBJECT_ID ('tempdb..#a_e_breach_cdp2') IS NOT NULL
+DROP TABLE #a_e_breach_cdp2
+
+select Breakdown, 
+OrgCode,
+OrgName,
+[Month] ,
+sum(case when AgeCat in ('0-11','12-17') then MH_Attendances end) as MH_Attendances_CYP,
+
+sum(case when AgeCat in ('0-11','12-17') then MH_Breach12hrs  end) as MH_Breach12hrs_CYP,
+
+case when (sum(case when AgeCat in ('0-11','12-17') then MH_Attendances end)) = 0 then null else
+sum(case when AgeCat in ('0-11','12-17') then MH_Breach12hrs  end)*1.0/sum(case when AgeCat in ('0-11','12-17') then MH_Attendances end) end as MH_Breach12hrs_rate_CYP,
+
+sum(case when AgeCat in ('18-25','26-64','65+') then MH_Attendances end) as MH_Attendances_Adults,
+
+sum(case when AgeCat in ('18-25','26-64','65+')  then MH_Breach12hrs  end) as MH_Breach12hrs_Adults
+
+,case when (sum(case when AgeCat in ('18-25','26-64','65+') then MH_Attendances end))=0 then null else
+sum(case when AgeCat in ('18-25','26-64','65+') then MH_Breach12hrs  end)*1.0/sum(case when AgeCat in ('18-25','26-64','65+') then MH_Attendances end) end as MH_Breach12hrs_rate_Adults
+
+into #a_e_breach_cdp2
+
+from #a_e_breach_cdp
+
+group by Breakdown, 
+OrgCode,
+OrgName,
+[Month] 
+
+--Creates CYP A&E 12hr breaches table, adding rounding and suppression
+
+select Breakdown,
+OrgCode,
+OrgName,
+[Month],
+case when MH_Attendances_CYP<5 then NULL else cast(round(MH_Attendances_CYP/5.0,0)*5 as varchar) end as MH_Attendances_CYP,
+
+case when MH_Breach12hrs_CYP <5 then NULL else cast(round(MH_Breach12hrs_CYP/5.0,0)*5 as varchar) end as MH_Breach12hrs_CYP,
+
+case when MH_Breach12hrs_CYP <5 then NULL else cast(round(MH_Breach12hrs_rate_CYP,4)*100 as nvarchar) end as MH_Breach12hrs_rate_CYP
+
+from #a_e_breach_cdp2
+
+
+--Creates Adult A&E 12he breaches table, adding rounding and suppression
+
+select Breakdown,
+OrgCode,
+OrgName,
+[Month],
+
+case when MH_Attendances_Adults<5 then NULL else  cast(round(MH_Attendances_Adults/5.0,0)*5 as varchar) end as MH_Attendances_Adults, 
+
+case when MH_Breach12hrs_Adults <5 then NULL else cast(round(MH_Breach12hrs_Adults/5.0,0)*5 as varchar) end as MH_Breach12hrs_Adults,
+
+case when MH_Breach12hrs_Adults<5 then NULL else cast(round(MH_Breach12hrs_rate_Adults,4)*100 as nvarchar) end as MH_Breach12hrs_rate_Adults
+
+from #a_e_breach_cdp2

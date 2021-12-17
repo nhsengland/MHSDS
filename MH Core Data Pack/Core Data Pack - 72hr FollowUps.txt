@@ -1,0 +1,219 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+72 HOUR FOLLOW UPS 
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (SELECT MAX(REPORTING_PERIOD_END)
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+where [STATUS] <> 'provisional')
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = EOMONTH(dateadd(month,-11,@endrp))
+
+PRINT @STARTRP
+PRINT @ENDRP
+-----------------------------------------
+--PULL DENOMINATOR DATA (MHS78)
+
+--ENGLAND LEVEL
+
+IF OBJECT_ID ('tempdb..#mhs78') IS NOT NULL
+DROP TABLE #mhs78
+
+select REPORTING_PERIOD_END, 
+BREAKDOWN as [type], 
+case when PRIMARY_LEVEL = 'England' then 'Eng' else PRIMARY_LEVEL end as [code], 
+MEASURE_VALUE as [value] 
+
+into #mhs78
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs78'
+and BREAKDOWN in ('England')
+
+union
+--ADD CCG DATA
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'CCG - GP Practice or Residence' then 'CCG' else BREAKDOWN end as [type], 
+cc.CCG21 as [code], 
+sum(distinct(MEASURE_VALUE)) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] cc ON a.PRIMARY_LEVEL = cc.IC_CCG
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs78'
+and BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by
+BREAKDOWN,
+CCG21,
+REPORTING_PERIOD_END
+
+union
+-- ADD PROVIDER DATA
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'Provider of Responsibility' then 'Provider' else BREAKDOWN end as [type], 
+PRIMARY_LEVEL as [code], 
+MEASURE_VALUE as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs78'
+and BREAKDOWN in ('Provider of Responsibility')
+
+union
+--ADD REGION
+
+select a.REPORTING_PERIOD_END, 
+'Region' as [type], 
+c.Region_Code as [code],
+sum(a.MEASURE_VALUE) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and a.MEASURE_ID = 'mhs78'
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.Region_Code
+
+union
+--ADD STP
+
+select a.REPORTING_PERIOD_END, 
+'STP' as [type], 
+c.STP_Code as [code],
+sum(a.MEASURE_VALUE) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and a.MEASURE_ID = 'mhs78'
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.STP_Code
+
+----------------------------------------------------
+--PULL NUMERATOR DATA (MHS79)
+
+--ENGLAND LEVEL
+
+IF OBJECT_ID ('tempdb..#mhs79') IS NOT NULL
+DROP TABLE #mhs79
+
+select REPORTING_PERIOD_END, 
+BREAKDOWN as [type], 
+case when PRIMARY_LEVEL = 'England' then 'Eng' else PRIMARY_LEVEL end as [code], 
+MEASURE_VALUE as [value] 
+
+into #mhs79
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs79'
+and BREAKDOWN in ('England')
+
+union
+--ADDS CCG DATA
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'CCG - GP Practice or Residence' then 'CCG' else BREAKDOWN end as [type], 
+cc.[CCG21],
+sum(distinct([MEASURE_VALUE])) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] cc ON a.PRIMARY_LEVEL = cc.IC_CCG
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs79'
+and BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by
+BREAKDOWN,
+CCG21,
+REPORTING_PERIOD_END
+
+union
+--ADD PROVIDER DATA
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'Provider of Responsibility' then 'Provider' else BREAKDOWN end as [type], 
+PRIMARY_LEVEL as [code], 
+MEASURE_VALUE as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and MEASURE_ID = 'mhs79'
+and BREAKDOWN in ('Provider of Responsibility')
+
+union
+--ADD REGION DATA
+
+select a.REPORTING_PERIOD_END, 
+'Region' as [type], 
+c.Region_Code as [code],
+sum(a.MEASURE_VALUE) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where a.REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and a.MEASURE_ID = 'mhs79'
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.Region_Code
+
+union
+--ADD STP DATA
+
+select a.REPORTING_PERIOD_END, 
+'STP' as [type], 
+c.STP_Code as [code],
+sum(a.MEASURE_VALUE) as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where a.REPORTING_PERIOD_END BETWEEN @STARTRP AND @ENDRP
+and a.MEASURE_ID = 'mhs79'
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.STP_Code
+
+--CALCULATE RATE
+
+	select 
+	d.REPORTING_PERIOD_END,
+	d.[type],
+	d.code,
+	case when e.value =0 then null when d.value < 5 then NULL else cast(round(d.value*100.0/e.value,0)as varchar) end as value
+	from #mhs79 d
+
+	left join #mhs78 e
+	on d.code = e.code
+	and d.REPORTING_PERIOD_END = e.REPORTING_PERIOD_END
+
+	WHERE d.[code] IS NOT NULL

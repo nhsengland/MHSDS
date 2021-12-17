@@ -1,0 +1,336 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+ADMISSIONS FOR PEOPLE NOT KNOWN TO MH SERVICES 
+Code pulls most recent 24 months of data
+
+Last updated: 17/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+DECLARE @RP_START INT
+DECLARE @RP_END INT
+DECLARE @RP_STARTDATE DATE
+DECLARE @RP_ENDDATE DATE
+DECLARE @Month Date
+
+--Finds most recent performance data and sets as end date
+SET @RP_ENDDATE = (SELECT [ReportingPeriodEndDate] FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] where Der_MostRecentFlag = 'P') -- Set to Y for performance data, P for provisional data
+SET @RP_END = (SELECT UniqMonthID FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE ReportingPeriodEndDate = @RP_ENDDATE)
+
+--Sets Start date as 24 months prior to end date
+SET @RP_START = @RP_END - 24
+SET @RP_STARTDATE = (SELECT MIN(ReportingPeriodStartDate) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE UniqMonthID = @RP_START)
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET ALL ADMISSIONS IN REPORTING PERIOD 	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('tempdb..#Admissions') IS NOT NULL	
+DROP TABLE #Admissions	
+	
+SELECT	
+	i.UniqMonthID
+	,i.UniqHospProvSpellNum
+	,i.Person_ID
+	,r.EthnicCategory
+	,CASE WHEN r.EthnicCategory NOT IN ('A','99','-1') THEN 1 ELSE 0 END as NotWhiteBritish 
+	,CASE WHEN r.EthnicCategory = 'A' THEN 1 ELSE 0 END as WhiteBritish
+	,i.OrgIDProv 
+	,o1.Organisation_Name AS Provider_Name
+	,ISNULL(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
+	,ISNULL(o2.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,r.OrgIDCCGRes,'Missing/Invalid') AS CCGCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [STP name]
+	,i.StartDateHospProvSpell
+	,i.StartTimeHospProvSpell 
+	,d.Fin_Quarter_Qq_Fin_Year_YYYY_dash_YY AS FY_Quarter
+	,DATEADD(MONTH, DATEDIFF(MONTH, 0, i.StartDateHospProvSpell), 0) AS Adm_month
+	,ia.HospitalBedTypeMH
+	,ISNULL(b.Main_Description_60_Chars,'Missing/Invalid') AS BedType
+	,r.AgeServReferRecDate
+	,r.UniqServReqID 
+	,r.UniqMonthID AS RefMonth
+	,r.RecordNumber AS RefRecordNumber 
+	,ROW_NUMBER()OVER(PARTITION BY i.UniqHospProvSpellNum ORDER BY r.UniqMonthID DESC, r.RecordNumber DESC) AS RN --- added because joining to refs produces some duplicates 
+	
+INTO #Admissions 	
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i 	
+
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] ia ON i.UniqHospProvSpellNum = ia.UniqHospProvSpellNum AND i.Person_ID = ia.Person_ID AND i.UniqServReqID = ia.UniqServReqID  ----- records are partitioned on spell, person and ref : therefore have joined on spell, person and ref	
+	AND ia.Der_FirstWardStayRecord = 1 ---- ward stay at admission
+	
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) 	
+	
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON i.OrgIDProv = o1.Organisation_Code 	
+	
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = o2.Organisation_Code	
+	
+LEFT JOIN NHSE_UKHF.Data_Dictionary.vw_Mental_Health_Admitted_Patient_Classification_SCD b ON ia.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1	
+	
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_Dates_Full d ON i.StartDateHospProvSpell = d.Full_Date 	
+	
+WHERE i.StartDateHospProvSpell BETWEEN @RP_STARTDATE AND @RP_ENDDATE	
+AND i.UniqMonthID BETWEEN @RP_START AND @RP_END	
+AND ia.HospitalBedTypeMH IN ('10','11','12') --- adult/older acute and PICU admissions only  	
+AND i.SourceAdmCodeHospProvSpell NOT IN ('49','53','87') --- excluding people transferred from other MH inpatient settings 	
+	
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET PREVIOUS CONTACTS FOR PEOPLE ADMITTED IN THE RP 	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('tempdb..#Prev_contacts') IS NOT NULL	
+DROP TABLE #Prev_contacts	
+	
+SELECT 	
+	a.UniqHospProvSpellNum
+	,a.OrgIDProv as Adm_OrgIDProv 
+	,a.Person_ID
+	,a.StartDateHospProvSpell
+	,a.StartTimeHospProvSpell 
+	,a.BedType
+	,c.UniqServReqID 
+	,c.Der_ActivityUniqID
+	,c.OrgIDProv as Cont_OrgIDProv 
+	,c.Der_ActivityType 
+	,c.AttendOrDNACode 
+	,c.ConsMediumUsed 
+	,c.Der_ContactDate 
+	,i.UniqHospProvSPellNum As Contact_spell --- to be removed 
+	,DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) AS TimeToAdm 
+	,ROW_NUMBER() OVER(PARTITION BY a.UniqHospProvSpellNum ORDER BY c.Der_ContactDate DESC) AS RN --- order to get most contact prior referral for each hospital spell 
+	
+INTO #Prev_contacts	
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity c 	
+	
+INNER JOIN #Admissions a ON c.Person_ID = a.Person_ID --- same person 	
+	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) <= 365 --- contact up to 1yr before admission
+	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) > 2 --- exclude contacts in two days before admission 
+	AND a.RN = 1 
+	
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i ON c.Person_ID = i.Person_ID AND c.UniqServReqID = i.UniqServReqID AND i.Der_HospSpellRecordOrder =1 --- to get contacts as part of hospital spell 	
+	AND i.UniqHospProvSpellNum IS NULL --- exclude contacts as part of a hospital spell 
+	
+WHERE 	
+(c.[Der_ActivityType] = 'DIRECT' AND c.AttendOrDNACode IN ('5','6') AND c.ConsMediumUsed NOT IN ('05','06')) 	
+OR c.[Der_ActivityType] = 'INDIRECT'	
+		
+	
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET CCG ADMISSIONS, AND ADMISSIONS FOR PEOPLE KNOWN TO SERVICES	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL	
+DROP TABLE #Agg	
+	
+SELECT 
+	a.Adm_month AS ReportingPeriodStartDate
+	,a.FY_Quarter
+	,a.Region_Code
+	,a.Region_Name
+	,a.OrgIDProv
+	,a.Provider_Name
+	,a.CCGCode
+	,a.[CCG name]
+	,a.STPCode
+	,a.[STP name]
+	,CASE 
+		WHEN a.WhiteBritish = 1 THEN 'White British' 
+		WHEN a.NotWhiteBritish = 1 THEN 'Non-white British' 
+		ELSE 'Missing/invalid' 
+	END as 'Ethnicity' 
+	,COUNT(*) AS Admissions  
+	,SUM(CASE WHEN p.UniqHospProvSpellNum IS NULL THEN 1 ELSE 0 END) as NoContact
+
+INTO #Agg
+
+FROM #Admissions a
+
+LEFT JOIN #Prev_contacts p ON a.UniqHospProvSpellNum = p.UniqHospProvSpellNum AND p.RN = 1 
+
+WHERE a.RN = 1 
+
+GROUP BY a.Adm_month,a.FY_Quarter, a.Region_Code, a.Region_Name, a.OrgIDProv, a.Provider_Name, a.CCGCode, a.[CCG name], a.STPCode, a.[STP name], 
+CASE 
+		WHEN a.WhiteBritish = 1 THEN 'White British' 
+		WHEN a.NotWhiteBritish = 1 THEN 'Non-white British' 
+		ELSE 'Missing/invalid' 
+	END
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET CCG ADMISSIONS, AND ADMISSIONS FOR PEOPLE KNOWN TO SERVICES	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('tempdb..#Output') IS NOT NULL	
+DROP TABLE #Output	
+
+SELECT 
+	'England' AS Org_Type 
+	,'Eng' AS Org_Code
+	,'England' AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(Admissions) AS Admissions
+	,SUM(NoContact) AS Nocontact
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN Admissions ELSE 0 END) as WhiteBritish_Admissions
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN NoContact ELSE 0 END) as WhiteBritish_NoContact
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
+
+INTO #Output
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate 
+
+UNION ALL 
+
+SELECT 
+	'Region' AS Org_Type 
+	,Region_Code AS Org_Code
+	,Region_Name AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(Admissions) AS Admissions
+	,SUM(NoContact) AS Nocontact
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN Admissions ELSE 0 END) as WhiteBritish_Admissions
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN NoContact ELSE 0 END) as WhiteBritish_NoContact
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
+
+FROM #Agg 
+
+GROUP BY Region_Code, Region_Name, ReportingPeriodStartDate 
+
+UNION ALL 
+
+SELECT 
+	'STP' AS Org_Type 
+	,STPCode AS Org_Code
+	,[STP name] AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(Admissions) AS Admissions
+	,SUM(NoContact) AS Nocontact
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN Admissions ELSE 0 END) as WhiteBritish_Admissions
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN NoContact ELSE 0 END) as WhiteBritish_NoContact
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
+
+FROM #Agg 
+
+GROUP BY STPCode, [STP name], ReportingPeriodStartDate 
+
+UNION ALL 
+
+SELECT 
+	'CCG' AS Org_Type 
+	,CCGCode AS Org_Code
+	,[CCG name] AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(Admissions) AS Admissions
+	,SUM(NoContact) AS Nocontact
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN Admissions ELSE 0 END) as WhiteBritish_Admissions
+	,SUM(CASE WHEN Ethnicity = 'White British' THEN NoContact ELSE 0 END) as WhiteBritish_NoContact
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
+	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
+
+FROM #Agg 
+
+GROUP BY CCGCode, [CCG name], ReportingPeriodStartDate 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE ROLLING QUARTERLY COUNTS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Rolling') IS NOT NULL
+DROP TABLE #Rolling
+
+SELECT
+	Org_Type
+	,Org_Code
+	,OrgName
+	,ReportingPeriodStartDate
+	,SUM(SUM(Admissions)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS Admissions 
+	,SUM(SUM(Nocontact)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS Nocontact 
+	,SUM(SUM(WhiteBritish_Admissions)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS WhiteBritish_Admissions 
+	,SUM(SUM(WhiteBritish_NoContact)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS WhiteBritish_NoContact 
+	,SUM(SUM(NonWhite_Admissions)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS NonWhite_Admissions 
+	,SUM(SUM(NonWhite_NoContact)) OVER (PARTITION BY Org_Type, Org_Code, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS NonWhite_NoContact 
+
+INTO #Rolling
+
+FROM #Output 
+
+GROUP BY Org_Type, Org_Code, OrgName, ReportingPeriodStartDate
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+SAVE ROLLING QUARTERLY COUNTS IN POLICY
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('NHSE_Sandbox_Policy.[dbo].[InPatientNoContactEveryone]') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_Policy].[dbo].[InPatientNoContactEveryone]
+
+select * INTO [NHSE_Sandbox_Policy].[dbo].[InPatientNoContactEveryone]
+
+FROM #Rolling
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CALCULATE %, APLLY SUPPRESSION AND ROUNDING
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#InPatientNoContactAllPercentage') IS NOT NULL
+DROP TABLE #InPatientNoContactAllPercentage
+
+SELECT Org_Type,
+Org_Code,
+ReportingPeriodStartDate,
+case when Admissions = 0 then null when Nocontact < 5 then NULL else cast(round(Nocontact*100.00/Admissions,0) as varchar) end as Nocontact,
+case when WhiteBritish_Admissions = 0 then null when WhiteBritish_NoContact< 5 then NULL else cast(round(WhiteBritish_NoContact *100.00 /WhiteBritish_Admissions,0) as varchar) end as WhiteBritish_NoContact,
+case when NonWhite_Admissions = 0 then null when NonWhite_NoContact < 5 then NULL else cast(round(NonWhite_NoContact*100.00/NonWhite_Admissions,0) as varchar) end as NonWhite_NoContact
+
+INTO #InPatientNoContactAllPercentage
+
+FROM #Rolling
+WHERE ReportingPeriodStartDate >= @RP_START
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OUTPUT - ALL IP
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+SELECT  Org_Type,
+		Org_Code,
+		ReportingPeriodStartDate, 
+		Nocontact
+
+FROM #InPatientNoContactAllPercentage
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OUTPUT - WHITE BRITISH
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+SELECT  Org_Type,
+		Org_Code,
+		ReportingPeriodStartDate, 
+		WhiteBritish_NoContact
+
+FROM #InPatientNoContactAllPercentage
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OUTPUT - NON WHITE BRITISH
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+SELECT  Org_Type,
+		Org_Code,
+		ReportingPeriodStartDate, 
+		NonWhite_NoContact
+
+FROM #InPatientNoContactAllPercentage

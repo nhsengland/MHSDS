@@ -1,0 +1,58 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+PERINATAL INDICATORS
+Code pulls most recent 12 months of data
+
+Last updated: 17/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+
+DECLARE @EndRP INT
+DECLARE @StartRP INT
+
+--Finds most recent performance data and sets as end date
+SET @EndRP = (SELECT UniqMonthID FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] WHERE Der_MostRecentFlag = 'Y')
+
+--Sets Start date as 12 months prior to end date
+SET @StartRP = @EndRP - 12
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PERINATAL YEAR TO DATE FIGURES
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+SELECT
+	ReportingPeriodEndDate as 'Reporting Period',
+	OrganisationType as 'Org_Type',
+	OrganisationCode as 'Org Code',
+	OrganisationName as 'Org Name',
+	CASE 
+		WHEN OrganisationType = 'England' THEN CAST (MeasureValue AS VARCHAR) 
+		WHEN OrganisationType <> 'England' AND MeasureValue <5 THEN NULL ELSE ISNULL(CAST(ROUND(MeasureValue/5.0,0)*5 AS VARCHAR),NULL) 
+	END AS 'Perinatal Access YTD'
+
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_Perinatal_Access]
+
+WHERE UniqMonthID between @StartRP and @EndRP AND MeasureName = 'YTD Access'
+
+ORDER BY 1 DESC, 2, 3
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PERINATAL ROLLING 12 MONTH FIGURES
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+SELECT
+	ReportingPeriodEndDate as 'Reporting Period',
+	OrganisationType as 'Org_Type',
+	OrganisationCode as 'Org Code',
+	OrganisationName as 'Org Name',
+	CASE 
+		WHEN OrganisationType = 'England' THEN CAST (MeasureValue AS VARCHAR) 
+		WHEN OrganisationType <> 'England' AND MeasureValue <5 THEN '*' ELSE ISNULL(CAST(ROUND(MeasureValue/5.0,0)*5 AS VARCHAR),'*') 
+	END AS 'Perinatal Access'
+
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_Perinatal_Access]
+
+WHERE UniqMonthID BETWEEN @StartRP and @EndRP AND MeasureName = 'Access'
+
+ORDER BY 1 DESC, 2, 3
+

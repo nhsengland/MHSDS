@@ -1,0 +1,187 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DATA QUALITY - OUTCOMES
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (select [ReportingPeriodEndDate]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+where Der_CurrentSubmissionWindow = 'Performance'
+group by [ReportingPeriodEndDate]) 	
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-11,@ENDRP))
+
+/* Get DQ3 data */
+
+IF OBJECT_ID ('tempdb..#DQ3') IS NOT NULL
+drop table #DQ3
+
+select	
+[ReportingPeriodEndDate],	
+[Provider code],	
+[Provider name],	
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+[MeasureValue],	
+[DenominatorValue]	
+into #DQ3
+from	
+[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality] 	
+
+where	
+[Region code] <> 'Wales'	
+and Dashboard = 'Outcomes CQUIN'
+--and [Der_OrgSubmissionStatus] in ('Missing submission', 'Successful submission', 'Provider not yet submitting')			
+and [Breakdown category] <> 'CYP and perinatal'
+and [ReportingPeriodEndDate] between @STARTRP and @ENDRP
+
+group by	
+[ReportingPeriodEndDate],	
+[Provider code],	
+[Provider name],	
+[Region code],	
+[Region name],	
+[STP code],	
+[STP name],	
+[MeasureValue],	
+[DenominatorValue]	
+
+/* Create Data Quality KPI 3 table*/
+
+
+/*Add Provider level data*/
+
+select
+[ReportingPeriodEndDate],
+'Provider' as 'OrgType',
+'Data Quality Outcomes' as 'Data Source',
+[Provider code] as 'Org code',
+[Provider name] as 'Org name',
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+sum([MeasureValue]) as 'Measure Value',
+sum(cast([DenominatorValue] as float)) as 'Denominator Value',
+case
+	when (sum(cast([DenominatorValue] as float)))=0
+	then NULL
+	else(sum(cast([MeasureValue] as float)) / (sum(cast([DenominatorValue] as float)))*100) 
+	end as 'Value'
+from
+#DQ3
+
+where
+[Region code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Provider code],
+[Provider name],
+[Region code],
+[Region name],
+[STP code],
+[STP name]
+
+UNION
+
+/* Add STP level data*/
+
+select
+[ReportingPeriodEndDate],
+'STP' as 'OrgType',
+'Data Quality Outcomes' as 'Data Source',
+[STP code] as 'Org code',
+[STP name] as 'Org name',
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+sum([MeasureValue]),
+sum(cast([DenominatorValue] as float)) as 'Denominator Value',
+case
+	when (sum(cast([DenominatorValue] as float)))=0
+	then NULL
+	else(sum(cast([MeasureValue] as float)) / (sum(cast([DenominatorValue] as float)))*100) 
+	end as 'Value'
+from
+#DQ3
+
+where
+[STP code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Region code],
+[Region name],
+[STP code],
+[STP name]
+
+/* Add Region level data */
+
+UNION
+
+select
+[ReportingPeriodEndDate],
+'Region' as 'OrgType',
+'Data Quality Outcomes' as 'Data Source',
+[Region code] as 'Org code',
+[Region name] as 'Org name',
+[Region code],
+[Region name],
+'NA' as 'STP code',
+'NA' as 'STP name',
+sum([MeasureValue]),
+sum(cast([DenominatorValue] as float)) as 'Denominator Value',
+case
+	when (sum(cast([DenominatorValue] as float)))=0
+	then NULL
+	else(sum(cast([MeasureValue] as float)) / (sum(cast([DenominatorValue] as float)))*100) 
+	end as 'Value'
+from
+#DQ3
+
+where
+[Region code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Region code],
+[Region name]
+
+/* Add England level data */
+
+UNION
+
+select
+[ReportingPeriodEndDate],
+'England' as 'OrgType',
+'Data Quality Outcomes' as 'Data Source',
+'Eng' as 'Org code',
+'England' as 'Org name',
+'Eng' as 'Region code',
+'England' as 'Region name',
+'Eng' as 'STP code',
+'England' as 'STP name',
+sum([MeasureValue]),
+sum(cast([DenominatorValue] as float)) as 'Denominator Value',
+case
+	when (sum(cast([DenominatorValue] as float)))=0
+	then NULL
+	else(sum(cast([MeasureValue] as float)) / (sum(cast([DenominatorValue] as float)))*100) 
+	end as 'Value'
+from
+#DQ3
+
+group by
+[ReportingPeriodEndDate]
+

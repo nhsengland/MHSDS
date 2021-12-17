@@ -1,0 +1,115 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+EIP WITHIN 2 WEEKS
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (SELECT MAX(REPORTING_PERIOD_END)
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+where [STATUS] <> 'provisional')
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-11,@ENDRP))
+
+
+--ENGLAND LEVEL
+
+select REPORTING_PERIOD_END, 
+BREAKDOWN as [type], 
+case when PRIMARY_LEVEL = 'England' then 'Eng' else PRIMARY_LEVEL end as [code], 
+MEASURE_VALUE as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'EIP23i'
+and BREAKDOWN in ('England')
+
+union
+
+--CCG
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'CCG - GP Practice or Residence' then 'CCG' else BREAKDOWN end as [type], 
+c.CCG21 as [code], 
+case when sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end)) <5 then NULL else
+(sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end))/sum((case when MEASURE_ID = 'EIP23a' then MEASURE_VALUE end))*100) end
+as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c 
+ON c.IC_CCG = a.PRIMARY_LEVEL
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID in ('EIP23a', 'EIP23b')
+and BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by
+REPORTING_PERIOD_END,
+BREAKDOWN,
+c.CCG21
+
+union
+
+--PROVIDER
+
+select REPORTING_PERIOD_END, 
+case when BREAKDOWN = 'Provider of Responsibility' then 'Provider' else BREAKDOWN end as [type], 
+PRIMARY_LEVEL as [code], 
+MEASURE_VALUE as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'EIP23i'
+and BREAKDOWN in ('Provider')
+
+union
+
+--REGION
+
+select a.REPORTING_PERIOD_END, 
+'Region' as [type], 
+c.Region_Code as [code],
+case when sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end)) <5 then NULL else
+sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end))/sum((case when MEASURE_ID = 'EIP23a' then MEASURE_VALUE end))*100 end
+as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where a.REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID in ('EIP23a', 'EIP23b')
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.Region_Code
+
+union
+
+--STP
+
+select a.REPORTING_PERIOD_END, 
+'STP' as [type], 
+c.STP_Code as [code],
+case when sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end)) <5 then NULL else
+sum((case when MEASURE_ID = 'EIP23b' then MEASURE_VALUE end))/sum((case when MEASURE_ID = 'EIP23a' then MEASURE_VALUE end))*100 end
+as [value] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles] a
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c 
+ON c.Organisation_Code = a.PRIMARY_LEVEL
+
+where a.REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID in ('EIP23a', 'EIP23b')
+and a.BREAKDOWN in ('CCG - GP Practice or Residence')
+
+group by a.REPORTING_PERIOD_END, 
+c.STP_Code

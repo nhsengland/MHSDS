@@ -1,0 +1,34 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMMUNITY MENTAL HEALTH 2+ CONTACTS
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @StartRP DATE
+DECLARE @EndRP DATE
+DECLARE @Month DATE
+
+SET @EndRP = (SELECT [ReportingPeriodEndDate] FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] where Der_MostRecentFlag = 'Y')
+SET @StartRP = EOMONTH(dateadd(mm,-11,@EndRP))
+
+print @startrp
+print @endrp
+
+SELECT
+	ReportingPeriodEndDate,
+	[Organisation type],
+	[Organisation code],
+	[Organisation name],
+	CASE 
+		WHEN [Organisation type] = 'England' THEN CAST ([CMH access] AS VARCHAR) 
+		WHEN [Organisation type] <> 'England' AND [CMH access] <5 THEN NULL ELSE ISNULL(CAST(ROUND([CMH access]/5.0,0)*5 AS VARCHAR),NULL) 
+	END AS RollingAccess
+
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_CMHWaitsAccess
+
+WHERE Der_AccessType = 'Second - rolling' AND ReportingPeriodEndDate between @StartRP and @EndRP
+
+ORDER BY 2,3,1

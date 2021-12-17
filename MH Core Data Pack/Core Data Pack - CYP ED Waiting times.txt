@@ -1,0 +1,199 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CYP EATING DISORDER WAITING TIMES
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @RPEndDate Date
+DECLARE @RPStartDate DATE
+DECLARE @Month as Date
+
+--Finds most recent performance data and sets as end date
+SET @RPEndDate = (select MAX([effective_snapshot_date]) from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Region1])
+
+--Sets Start date as 12 months prior to end date
+SET @RPStartDate = eomonth(DATEADD(mm,-12,@RPEndDate))
+
+print @rpenddate
+print @rpstartdate
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CYPED Urgent
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+--England
+
+SELECT Effective_Snapshot_Date,
+'Eng' as Org_Code,
+'England' as Org_Type,
+sum(case when Weeks_Since_Referral = '>0-1 week' then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Region1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'urgent'
+
+group by Effective_Snapshot_Date
+
+union
+
+--REGION
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code, 
+'Region' as Org_Type,
+sum(case when Weeks_Since_Referral = '>0-1 week' then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Region1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'urgent'
+
+group by Effective_Snapshot_Date,
+Organisation_Code
+
+union
+
+--STP
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code COLLATE DATABASE_DEFAULT,
+'STP' as Org_Type, 
+sum(case when Weeks_Since_Referral = '>0-1 week' then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_STP1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'urgent'
+
+group by Effective_Snapshot_Date,
+Organisation_Code
+
+union
+
+--CCG
+
+SELECT Effective_Snapshot_Date,
+cc.CCG21 COLLATE DATABASE_DEFAULT,
+'CCG' as Org_Type, 
+sum(case when Weeks_Since_Referral = '>0-1 week' then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Comm1]a
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] cc ON a.Organisation_Code COLLATE DATABASE_DEFAULT = cc.IC_CCG COLLATE DATABASE_DEFAULT
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'urgent'
+and Organisation_Code <> 'X24'
+
+group by Effective_Snapshot_Date,
+cc.CCG21
+
+union
+
+--PROVIDER
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code, 
+'Provider' as Org_Type,
+case when sum(No_Of_Patients) = 0 then NULL else
+sum(case when Weeks_Since_Referral = '>0-1 week' then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 end as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Prov1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'urgent'
+
+group by Effective_Snapshot_Date,
+Organisation_Code
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CYPED Routine
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+--England
+
+SELECT Effective_Snapshot_Date,
+'Eng' as Org_Code,
+'England' as Org_Type,
+sum(case when Weeks_Since_Referral in ('>0-1 week','>1-4 weeks') then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Region1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'routine'
+
+group by Effective_Snapshot_Date
+
+union
+
+--REGION
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code, 
+'Region' as Org_Type,
+sum(case when Weeks_Since_Referral in ('>0-1 week','>1-4 weeks') then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Region1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'routine'
+
+group by Effective_Snapshot_Date,
+Organisation_Code
+
+union
+
+--STP
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code,
+'STP' as Org_Type, 
+sum(case when Weeks_Since_Referral in ('>0-1 week','>1-4 weeks') then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_STP1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'routine'
+
+group by Effective_Snapshot_Date,
+Organisation_Code
+
+union
+
+--CCG
+
+SELECT Effective_Snapshot_Date,
+cc.CCG21 COLLATE DATABASE_DEFAULT,
+'CCG' as Org_Type,
+sum(case when Weeks_Since_Referral in ('>0-1 week','>1-4 weeks') then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Comm1] a
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] cc ON a.Organisation_Code COLLATE DATABASE_DEFAULT = cc.IC_CCG COLLATE DATABASE_DEFAULT
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'routine'
+and Organisation_Code <> 'X24'
+
+group by Effective_Snapshot_Date,
+cc.CCG21
+
+union
+
+--PROVIDER
+
+SELECT Effective_Snapshot_Date,
+Organisation_Code, 
+'Provider' as Org_Type,
+case when sum(No_Of_Patients) = 0 then NULL else
+sum(case when Weeks_Since_Referral in ('>0-1 week','>1-4 weeks') then (No_Of_Patients) else 0 end)*1.0 / sum(No_Of_Patients) *100 end as Rate 
+
+from [NHSE_UKHF].[Mental_Health].[vw_CYP_With_Eating_Disorder_Waiting_Times_Prov1] d
+
+where Effective_Snapshot_Date between @RPStartDate and @RPEndDate
+and Urgent_Routine = 'routine'
+
+group by Effective_Snapshot_Date,
+Organisation_Code

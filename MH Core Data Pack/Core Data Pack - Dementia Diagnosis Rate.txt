@@ -1,0 +1,273 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DEMENTIA DIAGNOSIS RATE
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+DECLARE @Month DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (SELECT MAX(Effective_Snapshot_Date)
+FROM [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1])
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-12,@ENDRP))
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF DEMENTIA DATES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#DemDates') IS NOT NULL
+DROP TABLE #DemDates
+
+SELECT DISTINCT
+       dem.Effective_Snapshot_Date
+
+INTO #DemDates 
+
+FROM [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] Dem
+
+WHERE Effective_Snapshot_Date between @STARTRP and @ENDRP
+AND Measure in ('DIAG_RATE_65_PLUS')
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF DEMENTIA PROVIDER COMBINATIONS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#DemOrgs') IS NOT NULL
+DROP TABLE #DemOrgs
+
+SELECT DISTINCT
+COALESCE(cc.New_Code, dem.Org_Code) collate database_default as Org_Code
+,dem.Org_Type
+
+INTO #DemOrgs
+
+FROM [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] Dem
+
+LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[tbl_Ref_Other_ComCodeChanges_2122_RD] cc 
+ON cc.Org_Code = dem.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+WHERE dem.Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE LIST OF DATES AND ORGS TO MAKE SURE ALL
+MONTHS ARE REPORTED AGAINST
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#DemBase') IS NOT NULL
+DROP TABLE #DemBase
+
+SELECT
+       d.Effective_Snapshot_Date
+       ,o.Org_Code
+       ,o.Org_Type
+
+INTO #DemBase
+
+FROM #DemDates d, #DemOrgs o
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PULLS THROUGH VALUES FOR THE 21/22 CCGS - USE NUMERATOR/DENOMINATOR AS YOU CAN'T SUM RATE FOR MERGED CCGS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--NUMERATOR
+
+IF OBJECT_ID ('tempdb..#DDR_Num') IS NOT NULL
+DROP TABLE #DDR_Num
+
+SELECT 
+       b.Effective_Snapshot_Date
+       ,b.[Org_Code] collate database_default as Org_Code
+          ,'CCG' Org_Type
+       --,u.[Measure]
+          ,SUM(u.[Measure_Value]) AS 'DDR Num'
+
+INTO #DDR_Num
+
+FROM #DemBase b
+
+LEFT JOIN 
+
+(SELECT
+u.Effective_Snapshot_Date,
+COALESCE(cc.New_Code, u.Org_Code) as Org_Code, 
+u.Measure_Value
+
+FROM [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] u
+
+LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[tbl_Ref_Other_ComCodeChanges_2122_RD] cc 
+ON cc.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+WHERE u.Measure ='DEMENTIA_REGISTER_65_PLUS' AND u.Org_Type = 'CCG') u 
+
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+WHERE b.Org_Type = 'CCG'
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code, b.Org_Type
+
+--DENOMINATOR
+
+IF OBJECT_ID ('tempdb..#DDR_Denom') IS NOT NULL
+DROP TABLE #DDR_Denom
+SELECT 
+       b.Effective_Snapshot_Date
+       ,b.[Org_Code] collate database_default as Org_Code
+          ,'CCG' Org_Type
+          ,SUM(u.[Measure_Value]) AS 'DDR Denom'
+
+INTO #DDR_Denom
+FROM #DemBase b
+
+LEFT JOIN 
+
+(SELECT
+u.Effective_Snapshot_Date,
+COALESCE(cc.New_Code, u.Org_Code) as Org_Code, 
+u.Measure_Value
+
+FROM [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] u
+
+LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[tbl_Ref_Other_ComCodeChanges_2122_RD] cc 
+ON cc.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+WHERE u.Measure ='DEMENTIA_ESTIMATE_65_PLUS' AND u.Org_Type = 'CCG') u 
+
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+WHERE b.Org_Type = 'CCG'
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code, b.Org_Type
+
+--RATE
+
+IF OBJECT_ID ('tempdb..#DDR_CCG') IS NOT NULL
+DROP TABLE #DDR_CCG
+SELECT 
+
+n.Effective_Snapshot_Date,
+n.Org_Code,
+n.Org_Type,
+sum(cast(n.[DDR Num] as decimal)/d.[DDR Denom]) as value
+
+INTO #DDR_CCG
+FROM #DDR_Num n
+
+LEFT JOIN #DDR_Denom d
+ON n.Org_Code = d.Org_Code 
+and n.Effective_Snapshot_Date = d.Effective_Snapshot_Date
+and n.Org_Type = d.Org_Type
+
+group by n.Effective_Snapshot_Date,
+n.Org_Code,
+n.Org_Type
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DEMENTIA RATE DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#DemRaw') IS NOT NULL
+DROP TABLE #DemRaw
+
+--England--
+
+SELECT 
+       b.Effective_Snapshot_Date
+	   ,b.Org_Code
+       ,'England' Org_Type
+       ,SUM(case when [u].Measure = 'DIAG_RATE_65_PLUS' then u.[Measure_Value] end) AS 'Dementia Diagnosis Rate'
+
+INTO #DemRaw
+
+FROM #DemBase b
+
+LEFT JOIN [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] u 
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+AND b.Org_Type=u.Org_Type
+
+WHERE u.Measure in ('DIAG_RATE_65_PLUS')
+AND b.Org_Type in ('COUNTRY_RESPONSIBILITY')
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code, u.[Measure], b.Org_Type
+
+UNION 
+
+--- CCG (PULLS THROUGH HISTORICAL DATA FOR MERGERS) ---
+SELECT Effective_Snapshot_Date,
+Org_Code,
+'CCG' Org_Type,
+round(value*100,1) AS 'Dementia Diagnosis Rate'
+
+FROM #DDR_CCG
+
+UNION
+
+
+--- STP ---
+
+SELECT 
+       b.Effective_Snapshot_Date
+       ,b.[Org_Code]
+       ,'STP' Org_Type
+       ,SUM(case when [u].Measure = 'DIAG_RATE_65_PLUS' then u.[Measure_Value] end) AS 'Dementia Diagnosis Rate'
+
+FROM #DemBase b
+
+LEFT JOIN [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] u 
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+AND b.Org_Type=u.Org_Type
+
+WHERE u.Measure in ('DIAG_RATE_65_PLUS')
+AND b.Org_Type in ('STP')
+
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code, u.[Measure], b.Org_Type
+
+UNION
+
+
+--- Region ---
+
+SELECT 
+       b.Effective_Snapshot_Date
+       ,b.[Org_Code]
+       ,'Region' Org_Type
+       ,SUM(case when [u].Measure = 'DIAG_RATE_65_PLUS' then u.[Measure_Value] end) AS 'Dementia Diagnosis Rate'
+
+FROM #DemBase b
+
+LEFT JOIN [NHSE_UKHF].[Rec_Dementia_Diag].[vw_Diag_Rate_By_NHS_Org_65Plus1] u 
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+AND b.Org_Type=u.Org_Type
+
+WHERE u.Measure in ('DIAG_RATE_65_PLUS')
+AND b.Org_Type in ('NHS_REGION')
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code, u.[Measure], b.Org_Type
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET FINAL DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+SELECT
+       c.Effective_Snapshot_Date
+       ,c.Org_Code
+       ,c.Org_Type
+       ,[Dementia Diagnosis Rate]
+
+FROM #DemRaw c
+
+GROUP BY c.Effective_Snapshot_Date, c.Org_Code, Org_Type, c.[Dementia Diagnosis Rate]

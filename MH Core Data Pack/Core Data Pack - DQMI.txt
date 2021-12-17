@@ -1,0 +1,159 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DQMI
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (select [ReportingPeriodEndDate]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+where Der_CurrentSubmissionWindow = 'Performance'
+group by [ReportingPeriodEndDate]) 	
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-11,@ENDRP))
+
+/* Get DQ2 data */
+
+IF OBJECT_ID ('tempdb..#DQ2') IS NOT NULL
+drop table #DQ2
+
+select	
+[ReportingPeriodEndDate],	
+[Provider code],	
+[Provider name],
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+[MeasureValue]
+into #DQ2
+from	
+[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality] 	
+
+where	
+[Region code] <> 'Wales'	
+and Dashboard = 'DQMI'	
+and [Breakdown] = 'Data set score'			
+and [ReportingPeriodEndDate] between @STARTRP and @ENDRP
+
+group by	
+[ReportingPeriodEndDate],	
+[Provider code],	
+[Provider name],	
+[Region code],	
+[Region name],	
+[STP code],	
+[STP name],	
+[MeasureValue]	
+
+/* Create Data Quality KPI 2 table*/
+
+
+/*Add Provider level data*/
+
+select
+[ReportingPeriodEndDate],
+'Provider' as 'OrgType',
+'DQMI' as 'Data Source',
+[Provider code] as 'Org code',
+[Provider name] as 'Org name',
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+avg(cast([MeasureValue] as float)) as 'Value'
+from
+#DQ2
+
+where
+[Region code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Provider code],
+[Provider name],
+[Region code],
+[Region name],
+[STP code],
+[STP name]
+
+UNION
+
+/* Add STP level data*/
+
+select
+[ReportingPeriodEndDate],
+'STP' as 'OrgType',
+'DQMI' as 'Data Source',
+[STP code] as 'Org code',
+[STP name] as 'Org name',
+[Region code],
+[Region name],
+[STP code],
+[STP name],
+avg(cast([MeasureValue] as float))
+from
+#DQ2
+
+where
+[STP code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Region code],
+[Region name],
+[STP code],
+[STP name]
+
+/* Add Region level data */
+
+UNION
+
+select
+[ReportingPeriodEndDate],
+'Region' as 'OrgType',
+'DQMI' as 'Data Source',
+[Region code] as 'Org code',
+[Region name] as 'Org name',
+[Region code],
+[Region name],
+'NA' as 'STP code',
+'NA' as 'STP name',
+avg(cast([MeasureValue] as float))
+from
+#DQ2
+
+where
+[Region code] <> 'Missing / Invalid'
+
+group by
+[ReportingPeriodEndDate],
+[Region code],
+[Region name]
+
+/* Add England level data */
+
+UNION
+
+select
+[ReportingPeriodEndDate],
+'England' as 'OrgType',
+'DQMI' as 'Data Source',
+'Eng' as 'Org code',
+'England' as 'Org name',
+'Eng' as 'Region code',
+'England' as 'Region name',
+'Eng' as 'STP code',
+'England' as 'STP name',
+avg(cast([MeasureValue] as float))
+from
+#DQ2
+
+group by
+[ReportingPeriodEndDate]

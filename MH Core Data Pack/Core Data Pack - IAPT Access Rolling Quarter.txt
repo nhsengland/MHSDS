@@ -1,0 +1,88 @@
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IAPT ACCESS ROLLING QUARTER
+
+Code sums unrounded monthly data to a rolling quarter and then applies rounding and suppression
+
+Last updated: 16/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#IAPTARaw') IS NOT NULL
+DROP TABLE #IAPTARaw
+
+SELECT 
+       [Month],
+       [Organisation Code],
+	   case when [GroupType]='regional' then 'Region' else [GroupType] end as [GroupType] , 
+	   case
+		when [Count_FirstTreatment] = '*' then NULL
+		else [Count_FirstTreatment]
+		end as Value
+
+INTO #IAPTARaw
+
+FROM NHSE_Sandbox_Policy.[dbo].[IAPT_MONTHLY_UNROUNDED] 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE TO ROLLING QUARTER
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#IAPTARolling') IS NOT NULL
+DROP TABLE #IAPTARolling
+
+SELECT 
+       DATEADD(dd,1,EOMONTH(u.[Month],-3)) as 'StartRP'
+	   ,u.[Month] as 'EndRP'
+       ,u.[Organisation Code]
+	   ,u.GroupType
+       ,(cast(u.[Value] as decimal) + u1.[Value] + u2.[Value]) AS Value
+
+INTO #IAPTARolling
+
+FROM #IAPTARaw u
+
+LEFT JOIN #IAPTARaw u1 ON u.[Organisation Code] = u1.[Organisation Code]  
+AND u1.[Month] = EOMONTH(DATEADD(mm,-1,u.[Month]))
+
+LEFT JOIN #IAPTARaw u2 ON u.[Organisation Code] = u2.[Organisation Code]
+AND u2.[Month] = EOMONTH(DATEADD(mm,-2,u.[Month]))
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OUTPUT FINAL TABLE
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#IAPTAoutput') IS NOT NULL
+DROP TABLE #IAPTAoutput
+
+SELECT 
+       b.StartRP
+	   ,b.EndRP
+       ,GroupType as 'Org_Type'
+       ,b.[Organisation Code] collate database_default 'Org_Code'
+	   ,cast([Value] as int) as [Activity]
+
+INTO #IAPTAoutput
+
+FROM #IAPTARolling b
+
+GROUP BY b.StartRP, b.EndRP, b.[Organisation Code], b.GroupType, b.[Value]
+--------------------------------------------------------------------------------
+--Rounding applied
+
+select StartRP,
+EndRP,
+Org_Type,
+Org_Code
+,CASE 
+	WHEN [Org_Type] = 'England' THEN [Activity]
+	WHEN [Activity]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Activity]+2) /5,0)*5 AS INT) AS VARCHAR), NULL) END AS Activity
+
+from #IAPTAoutput
+
+
+
+
+
+

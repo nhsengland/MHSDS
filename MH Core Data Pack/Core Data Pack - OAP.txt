@@ -1,0 +1,320 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OUT OF AREA PLACEMENTS
+Code pulls most recent 12 months of data
+
+Last updated: 17/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+DECLARE @MONTH DATETIME
+DECLARE @MONTHSTART DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (SELECT MAX(Publication_Period_End)
+FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1])
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-12,@ENDRP))
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OAP Inapprorpriate Bed days - Internal and External
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+
+--STP
+select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+'STP' as Org_Type,
+Question,
+Value
+
+FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+
+where Question in ('Total number of inappropriate OAP days over the period')
+and Breakdown1 = 'stp'
+and Effective_Snapshot_Date between @STARTRP and @ENDRP
+and Report_Period_Length = 'quarterly'
+and Breakdown1Code not in ('e54000005','e54000006','e54000033','e54000035','e54000049','999','England')
+
+ union 
+
+ --CCG
+
+select Publication_Period_Start,
+Publication_Period_End,
+case when o.New_Code is null then Breakdown1Code collate SQL_Latin1_General_CP1_CI_AS else o.New_Code end as Org_Code,
+'CCG' as Org_Type,
+Question,
+sum(Value)
+
+FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1] oap
+
+left join [NHSE_Sandbox_Policy].[dbo].[tbl_Ref_Other_ComCodeChanges_2122_RD] o
+on o.Org_Code = oap.Breakdown1Code collate SQL_Latin1_General_CP1_CI_AS
+
+where question  in ('Total number of inappropriate OAP days over the period')
+and Breakdown1 = 'ccg'
+and Effective_Snapshot_Date between @STARTRP and @ENDRP
+and Report_Period_Length = 'quarterly'
+and Breakdown1Code not in ('999','England')
+
+group by Publication_Period_Start,
+Publication_Period_End,
+Question,
+case when o.New_Code is null then Breakdown1Code collate SQL_Latin1_General_CP1_CI_AS else o.New_Code end 
+
+union 
+
+ --Region
+
+ select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+Breakdown1 as Org_Type,
+Question,
+Value
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'Region'
+ and Breakdown1Code not in ('999','England','Y54','Y55')
+ and Question in ('Total number of inappropriate OAP days over the period')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+union 
+
+ --England
+
+ select Publication_Period_Start,
+Publication_Period_End,
+'ENG' as Org_Code,
+Breakdown1 as Org_Type,
+Question,
+Value
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'England'
+ and Question in ('Total number of inappropriate OAP days over the period')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+ union
+
+ --Provider
+
+select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+'Provider' as Org_Type,
+Question,
+Value
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'SendingProvider'
+ and Breakdown1Code not in ('999','England')
+ and Question in ('Total number of inappropriate OAP days over the period')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+ 
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+OAP Inappropriate Bed Days - % External
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+IF OBJECT_ID ('tempdb..#OAP_ext') IS NOT NULL
+DROP TABLE #OAP_ext
+
+--STP
+select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+'STP' as Org_Type,
+Question,
+(Value*100) as 'Value'
+into #OAP_ext
+FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+
+where Question in ('Percentage of inappropriate OAP days in period that are external')
+and Breakdown1 = 'stp'
+and Effective_Snapshot_Date between @STARTRP and @ENDRP
+and Report_Period_Length = 'quarterly'
+and Breakdown1Code not in ('e54000005','e54000006','e54000033','e54000035','e54000049','999','England')
+
+ union 
+
+  --Region
+
+ select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+Breakdown1 as Org_Type,
+Question,
+Value*100
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'Region'
+ and Breakdown1Code not in ('999','England','Y54','Y55')
+ and Question in ('Percentage of inappropriate OAP days in period that are external')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+union 
+
+ --England
+
+ select Publication_Period_Start,
+Publication_Period_End,
+'ENG' as Org_Code,
+Breakdown1 as Org_Type,
+Question,
+Value*100
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'England'
+ and Question in ('Percentage of inappropriate OAP days in period that are external')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+ union
+
+ --Provider
+
+select Publication_Period_Start,
+Publication_Period_End,
+Breakdown1Code as Org_Code,
+'Provider' as Org_Type,
+Question,
+Value *100
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+
+ where Breakdown1 = 'SendingProvider'
+ and Breakdown1Code not in ('999','England')
+ and Question in ('Percentage of inappropriate OAP days in period that are external')
+ and Report_Period_Length = 'Quarterly'
+ and Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+--CCG: External % (recalculating to 106 CCG configuration)
+
+IF OBJECT_ID ('tempdb..#OAP_ext1') IS NOT NULL
+DROP TABLE #OAP_ext1
+ 
+ select * 
+ into #OAP_ext1
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+ where Publication_Period_End between @STARTRP and @ENDRP
+ and Question = 'Percentage of inappropriate OAP days in period that are external'
+ and Breakdown1 = 'ccg'
+ and Report_Period_Length='quarterly'
+ and Breakdown1Code not in ('999','England')
+
+--CCG: Inapp OAP days
+
+IF OBJECT_ID ('tempdb..#OAP_inapp') IS NOT NULL
+DROP TABLE #OAP_inapp
+
+ select *
+ into #OAP_inapp
+ FROM NHSE_UKHF.Mental_Health.vw_Out_Of_Area_Placements1 
+ where Publication_Period_End between @STARTRP and @ENDRP
+ and Question = 'Total number of inappropriate OAP days over the period'
+ and Breakdown1 = 'ccg'
+ and Report_Period_Length='quarterly'
+ and Breakdown1Code not in ('999','England')
+
+  ---------------------------------------------------------
+
+--CCG: Join those 2 tables
+
+IF OBJECT_ID ('tempdb..#OAP_both') IS NOT NULL
+DROP TABLE #OAP_both
+
+  select a.*, b.Value as 'External %' 
+  into #OAP_both
+  from #OAP_inapp a
+  left join #OAP_ext1 b on a.Breakdown1Code = b.Breakdown1Code
+  and a.Publication_Period_End = b.Publication_Period_End
+
+   ---------------------------------------------------------
+
+--CCG: Calulate External no.
+
+IF OBJECT_ID ('tempdb..#OAP_ext_no') IS NOT NULL
+DROP TABLE #OAP_ext_no
+
+ select Publication_Period_Start, 
+ Publication_Period_End,
+ Question,
+ Breakdown1,
+ Breakdown1Code,
+ Report_Period_Length,
+  sum(Value) as 'inapp OAP',
+ sum( [External %]) as [External %],
+ sum(Value)*sum([External %]) as 'External no.'
+ into #OAP_ext_no
+ from #OAP_both
+ group by Publication_Period_Start,  
+ Publication_Period_End,
+ Question,
+ Breakdown1,
+ Breakdown1Code,
+ Report_Period_Length
+
+ ---------------------------------------------------------
+
+--CCG: Aggregate to 106 CCGs (raw data includes old CCGs)
+
+IF OBJECT_ID ('tempdb..#OAP_106') IS NOT NULL
+DROP TABLE #OAP_106
+
+select a.Publication_Period_Start, 
+a.Publication_Period_End,
+ a.Question,
+ a.Breakdown1,
+ case when b.New_Code is null then a.Breakdown1Code collate SQL_Latin1_General_CP1_CI_AS else b.New_Code end as 'Code',
+ a.Report_Period_Length,
+  sum(a.[inapp OAP]) as 'Inapp OAP',
+sum(a.[External no.]) as 'External no.'
+ into #OAP_106
+ from #OAP_ext_no a
+
+ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges b
+ on a.Breakdown1Code=b.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+ group by a.Publication_Period_Start,
+ a.Publication_Period_End,
+ a.Question,
+ a.Breakdown1,
+ case when b.New_Code is null then a.Breakdown1Code collate SQL_Latin1_General_CP1_CI_AS else b.New_Code end,
+ a.Report_Period_Length
+
+  ---------------------------------------------------------
+
+--CCG: Calc External % for 106 CCGs
+
+IF OBJECT_ID ('tempdb..#OAP_106_ext') IS NOT NULL
+DROP TABLE #OAP_106_ext
+
+select Publication_Period_Start, 
+Publication_Period_End,
+ [Code] as [Org_Code],
+  'CCG' as [Org_Type],
+ 'Percentage of inappropriate OAP days in period that are external' as Question,
+case when [Inapp OAP] = 0 then NULL else ([External no.]*1.00000) /([Inapp OAP] *1.00000)*100.00000 end as 'Value'
+ into #OAP_106_ext
+ from #OAP_106
+
+--Insert CCG data into OAP Ext table
+ 
+INSERT INTO #OAP_ext
+select 
+Publication_Period_Start, 
+Publication_Period_End, 
+Org_Code, 
+Org_Type collate SQL_Latin1_General_CP1_CI_AS, 
+Question collate SQL_Latin1_General_CP1_CI_AS,
+Value 
+from #OAP_106_ext
+
+select * from #OAP_ext

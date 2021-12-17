@@ -1,0 +1,174 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+INDIVIDUAL PLACEMENT AND SUPPORT 
+Code pulls most recent 12 months of data
+
+Last updated: 17/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+DECLARE @RP_STARTDATE DATE
+DECLARE @RP_ENDDATE DATE
+
+--Finds most recent performance data and sets as end date
+SET @RP_ENDDATE = (SELECT eomonth(dateadd(month,-1,MAX(ReportingPeriodEnd))) FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_IPS_rebuild)
+
+--Sets Start date as 12 months prior to end date
+SET @RP_STARTDATE = (SELECT DATEADD(mm,-11,@RP_ENDDATE))
+
+IF OBJECT_ID ('tempdb..#t1') IS NOT NULL	
+DROP TABLE #t1
+
+IF OBJECT_ID ('tempdb..#tt1') IS NOT NULL	
+DROP TABLE #tt1
+
+--England
+
+SELECT [UniqMonthID]
+,[ReportingPeriodEnd]
+,'England' as OrgType
+,'Eng' as OrgName
+,'Eng'as OrgCode
+,SUM([MeasureValue]) AS [Total accessed (first contact in financial year)]
+
+into #t1
+
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild]
+WHERE MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
+and ReportingPeriodEnd >=  @RP_STARTDATE and ReportingPeriodEnd <=  @RP_ENDDATE
+GROUP BY UniqMonthID, ReportingPeriodEnd
+
+union 
+
+--Region
+
+SELECT [UniqMonthID]
+,[ReportingPeriodEnd]
+,'Region'
+,Region_Name
+,Region_Code
+,SUM([MeasureValue]) AS [Total accessed (first contact in financial year)]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild]
+WHERE MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
+and ReportingPeriodEnd >=  @RP_STARTDATE and ReportingPeriodEnd <=  @RP_ENDDATE
+GROUP BY Region_Name, Region_Code, UniqMonthID, ReportingPeriodEnd
+
+union
+
+--STP
+
+SELECT [UniqMonthID]
+,[ReportingPeriodEnd]
+,'STP'
+,STP_Name
+,STP_Code
+,SUM([MeasureValue]) AS [Total accessed (first contact in financial year)]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild]
+WHERE MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
+and ReportingPeriodEnd >=  @RP_STARTDATE and ReportingPeriodEnd <=  @RP_ENDDATE
+GROUP BY STP_Name, STP_Code, UniqMonthID, ReportingPeriodEnd
+
+union
+
+--CCG
+
+SELECT [UniqMonthID]
+,[ReportingPeriodEnd]
+,'CCG'
+,[CCGName]
+,[OrgIDCCGRes]
+,SUM([MeasureValue]) AS [Total accessed (first contact in financial year)]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild]
+WHERE MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
+and ReportingPeriodEnd >=  @RP_STARTDATE and ReportingPeriodEnd <=  @RP_ENDDATE
+GROUP BY OrgIDCCGRes, CCGName, UniqMonthID, ReportingPeriodEnd
+
+union
+
+--Provider
+
+SELECT [UniqMonthID]
+,[ReportingPeriodEnd]
+,'Provider'
+,[ProvName]
+,[OrgIDProv]
+,SUM([MeasureValue]) AS [Total accessed (first contact in financial year)]
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild]
+WHERE MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
+and ReportingPeriodEnd >=  @RP_STARTDATE and ReportingPeriodEnd <=  @RP_ENDDATE
+GROUP BY OrgIDProv, ProvName, UniqMonthID, ReportingPeriodEnd
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE CUMULATIVE COUNTS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+SELECT
+[UniqMonthID]
+,[ReportingPeriodEnd]
+,OrgType
+,OrgCode
+,OrgName
+,CASE 
+  when ReportingPeriodEnd like '%-04-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 0 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-05-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-06-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-07-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-08-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-09-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-10-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-11-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 7 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-12-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 8 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-01-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-02-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-03-%' then SUM(SUM([Total accessed (first contact in financial year)])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) 
+ END AS [Total accessed (first contact in financial year)]
+,t2.[Target]
+
+INTO #tt1
+
+FROM #t1 t
+
+LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[IPSTargets] t2 on (t.[ReportingPeriodEnd] = t2.[ReportingPeriodEndDate] and t.OrgCode = t2.[Org Code])
+
+GROUP BY
+[UniqMonthID]
+,[ReportingPeriodEnd]
+,OrgType
+,OrgName
+,OrgCode
+,t2.[Target]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+SUPPRESSION & CUMULATIVE COUNTS OF TARGETS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+SELECT
+UniqMonthID
+,ReportingPeriodEnd
+,OrgType
+,OrgCode
+,OrgName
+,CASE when [Total accessed (first contact in financial year)] <5 then '' ELSE cast(round(([Total accessed (first contact in financial year)]+2)/5,0)*5 as varchar) end AS [Total accessed (first contact in financial year)]
+,CASE 
+  when ReportingPeriodEnd like '%-04-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 0 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-05-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-06-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-07-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-08-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-09-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-10-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-11-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 7 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-12-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 8 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-01-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-02-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW) 
+  when ReportingPeriodEnd like '%-03-%' then SUM(SUM([Target])) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY [ReportingPeriodEnd] ASC ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) 
+ END AS [Target]
+
+FROM #tt1
+
+GROUP BY
+UniqMonthID
+,ReportingPeriodEnd
+,OrgType
+,OrgName
+,OrgCode
+,[Total accessed (first contact in financial year)]

@@ -1,0 +1,159 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+PHYSICAL HEALTH CHECKS FOR PEOPLE WITH SEVERE MENTAL ILLNESS
+Code pulls most recent 12 months of data
+
+Last updated: 17/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @ENDRP = (SELECT MAX(Effective_Snapshot_Date)
+FROM [NHSE_UKHF].[Physical_Health_Checks_Severe_Mental_Illness].[vw_Data1])
+
+--Sets Start date as 12 months prior to end date
+SET @STARTRP = (SELECT DATEADD(mm,-12,@ENDRP))
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF SMI DATES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#SMIDates') IS NOT NULL
+DROP TABLE #SMIDates
+
+SELECT DISTINCT
+       Effective_Snapshot_Date
+       ,Question
+
+INTO #SMIDates 
+
+FROM [NHSE_UKHF].[Physical_Health_Checks_Severe_Mental_Illness].[vw_Data1]
+
+WHERE Effective_Snapshot_Date between @STARTRP and @ENDRP 
+AND Question IN ('All6PHC','SMIRegister')
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF SMI PROVIDER 
+AND COMMISSIONER COMBINATIONS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#SMIOrgs') IS NOT NULL
+DROP TABLE #SMIOrgs
+
+SELECT DISTINCT
+            Commissioner_Code 'Org_Code'
+
+INTO #SMIOrgs
+
+FROM [NHSE_UKHF].[Physical_Health_Checks_Severe_Mental_Illness].[vw_Data1]
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE LIST OF DATES AND ORGS TO MAKE SURE ALL
+MONTHS ARE REPORTED AGAINST
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#SMIBase') IS NOT NULL
+DROP TABLE #SMIBase
+
+SELECT
+       d.Effective_Snapshot_Date
+       ,d.Question
+       ,o.Org_Code
+
+INTO #SMIBase
+
+FROM #SMIDates d, #SMIOrgs o
+WHERE d.Effective_Snapshot_Date between @STARTRP and @ENDRP
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET SMI PHYSICAL CHECKS DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#SMIRaw') IS NOT NULL
+DROP TABLE #SMIRaw
+
+SELECT 
+       b.Effective_Snapshot_Date
+       ,case when cc.New_Code is null then b.Org_Code else cc.New_Code collate database_default end as Org_Code
+       ,b.[Question]
+       ,sum(ISNULL(cast(u.[Answer] as float),0)) AS [Value]
+
+INTO #SMIRaw
+
+FROM #SMIBase b
+
+LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[tbl_Ref_Other_ComCodeChanges_2122_RD] cc 
+ON cc.Org_Code = b.Org_Code collate SQL_Latin1_General_CP1_CI_AS
+
+LEFT JOIN [NHSE_UKHF].[Physical_Health_Checks_Severe_Mental_Illness].[vw_Data1] u 
+ON b.Effective_Snapshot_Date = u.Effective_Snapshot_Date 
+AND b.Org_Code = u.Commissioner_Code collate database_default
+AND b.Question=u.Question
+
+group by 
+       b.Effective_Snapshot_Date
+       ,case when cc.New_Code is null then b.Org_Code else cc.New_Code collate database_default end 
+       ,b.[Question]
+   
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+FINAL SMI DATA TABLE
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+---CCG---
+
+SELECT 
+       b.Effective_Snapshot_Date
+       ,'CCG' as 'Org_Type'
+	   ,b.Org_Code collate database_default as 'Org_Code'
+	   ,case when (SUM(CASE WHEN Question = 'SMIRegister' THEN [Value] END))=0 then null else SUM(CASE WHEN Question = 'All6PHC' THEN [Value] END) end as 'SMI - Physical health checks - Activity'
+
+FROM #SMIRaw b
+
+GROUP BY b.Effective_Snapshot_Date, b.Org_Code
+
+UNION
+
+--REGION--
+
+SELECT b.Effective_Snapshot_Date
+       ,'Region' 'Org_Type'
+       ,c.Region_Code COLLATE DATABASE_DEFAULT AS 'Org_Code'
+	   ,case when (SUM(CASE WHEN Question = 'SMIRegister' THEN [Value] END))=0 then null else SUM(CASE WHEN Question = 'All6PHC' THEN [Value] END) end as 'SMI - Physical health checks - Activity'
+FROM #SMIRaw b
+LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] c on b.Org_Code = c.Organisation_Code COLLATE DATABASE_DEFAULT
+
+WHERE c.Organisation_Code is not null
+
+GROUP BY b.Effective_Snapshot_Date, c.Region_Code
+
+UNION
+
+--STP--
+
+SELECT b.Effective_Snapshot_Date
+       ,'STP' 'Org_Type'
+       ,c.STP_Code COLLATE DATABASE_DEFAULT AS 'Org_Code'
+	   ,case when (SUM(CASE WHEN Question = 'SMIRegister' THEN [Value] END))=0 then null else SUM(CASE WHEN Question = 'All6PHC' THEN [Value] END) end as 'SMI - Physical health checks - Activity'
+
+FROM #SMIRaw b
+LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] c on b.Org_Code = c.Organisation_Code COLLATE DATABASE_DEFAULT
+
+WHERE c.Organisation_Code is not null
+
+GROUP BY b.Effective_Snapshot_Date, c.STP_Code
+
+UNION 
+
+---ENGLAND---
+
+SELECT b.Effective_Snapshot_Date
+       ,'England' 'Org_Type'
+       ,'Eng' AS 'Org_Code'
+	   ,case when (SUM(CASE WHEN Question = 'SMIRegister' THEN [Value] END))=0 then null else SUM(CASE WHEN Question = 'All6PHC' THEN [Value] END) end as 'SMI - Physical health checks - Activity'
+
+FROM #SMIRaw b
+
+GROUP BY b.Effective_Snapshot_Date

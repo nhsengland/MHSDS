@@ -1,0 +1,628 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LONG LENGTH OF STAY RATE FOR ADULTS AND OLDER ADULTS
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CODE FOR DATA UP TO JUNE 2021 - Prior to metir being added to MHSDS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+-- SET REPORTING PERIOD VARIABLES 
+
+DECLARE @RP_STARTDATE DATE
+DECLARE @RP_ENDDATE DATE
+
+SET @RP_ENDDATE = '2021-06-30'
+SET @RP_STARTDATE = (SELECT DATEADD(mm,-24,@RP_ENDDATE))
+
+print @RP_ENDDATE
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL DISCHARGED HOSPITAL SPELLS IN REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Spells') IS NOT NULL
+DROP TABLE #Spells
+
+SELECT 
+	i.UniqHospProvSpellNum
+	,i.UniqMonthID
+	,i.ReportingPeriodStartDate
+	,i.OrgIDProv
+	,o1.Organisation_Name AS Provider_Name
+	,COALESCE(o2.Region_Code,'Missing/Invalid') AS Region_Code 
+	,COALESCE(o2.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code, r.OrgIDCCGRes,'Missing/Invalid') AS CCGCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [STP name]
+	,i.HospitalBedTypeMH
+	,i.StartDateHospProvSpell
+	,i.DischDateHospProvSpell
+	,DATEDIFF(DD, i.StartDateHospProvSpell, i.DischDateHospProvSpell)+1 as LOS
+
+INTO #Spells 
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i 
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) 
+
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON i.OrgIDProv = o1.Organisation_Code 
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code 
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = o2.Organisation_Code
+
+WHERE i.ReportingPeriodStartDate BETWEEN @RP_STARTDATE AND @RP_ENDDATE 
+AND i.DischDateHospProvSpell >= @RP_STARTDATE 
+AND i.HospitalBedTypeMH IN ('10','11') 
+AND i.Der_LastWardStayRecord = 1 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE BY CCG AND COUNT LOS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL
+DROP TABLE #Agg
+
+SELECT
+	ReportingPeriodStartDate
+	,OrgIDProv
+	,Provider_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,Region_Code
+	,Region_Name
+	,CASE WHEN HospitalBedTypeMH = '10' THEN 'Adult acute' WHEN HospitalBedTypeMH = '11' THEN 'Older adult acute' END as BedType 
+	,COUNT(*) AS Discharges 
+	,SUM(CASE WHEN LOS > 60 THEN 1 ELSE 0 END) as Over60Days 
+	,SUM(CASE WHEN LOS > 90 THEN 1 ELSE 0 END) as Over90Days 
+
+INTO #Agg
+
+FROM #Spells 
+
+GROUP BY ReportingPeriodStartDate, OrgIDProv, Provider_Name, CCGCode, [CCG name], STPCode, [STP name], Region_Code, Region_Name, CASE WHEN HospitalBedTypeMH = '10' THEN 'Adult acute' WHEN HospitalBedTypeMH = '11' THEN 'Older adult acute' END
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE ENG, STP, CGG, AND PROVIDER TABLES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#Output') IS NOT NULL
+DROP TABLE #Output
+
+SELECT
+	'England' AS OrgType 
+	,'Eng' AS OrgCode
+	,'England' AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Discharges ELSE 0 END) as AdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over60Days ELSE 0 END) as AdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over90Days ELSE 0 END) as AdultAcute_Over90Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Discharges ELSE 0 END) as OlderAdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over60Days ELSE 0 END) as OlderAdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over90Days ELSE 0 END) as OlderAdultAcute_Over90Days
+
+INTO #Output
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate
+
+UNION ALL 
+
+SELECT
+	'Region' AS OrgType 
+	,Region_Code AS OrgCode
+	,Region_Name AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Discharges ELSE 0 END) as AdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over60Days ELSE 0 END) as AdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over90Days ELSE 0 END) as AdultAcute_Over90Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Discharges ELSE 0 END) as OlderAdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over60Days ELSE 0 END) as OlderAdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over90Days ELSE 0 END) as OlderAdultAcute_Over90Days
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate, Region_Code, Region_Name
+
+UNION ALL 
+
+SELECT
+	'STP' AS OrgType 
+	,STPCode AS OrgCode
+	,[STP name] AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Discharges ELSE 0 END) as AdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over60Days ELSE 0 END) as AdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over90Days ELSE 0 END) as AdultAcute_Over90Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Discharges ELSE 0 END) as OlderAdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over60Days ELSE 0 END) as OlderAdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over90Days ELSE 0 END) as OlderAdultAcute_Over90Days
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate, STPCode, [STP name]
+
+UNION ALL 
+
+SELECT
+	'CCG' AS OrgType 
+	,CCGCode AS OrgCode
+	,[CCG name] AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Discharges ELSE 0 END) as AdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over60Days ELSE 0 END) as AdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over90Days ELSE 0 END) as AdultAcute_Over90Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Discharges ELSE 0 END) as OlderAdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over60Days ELSE 0 END) as OlderAdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over90Days ELSE 0 END) as OlderAdultAcute_Over90Days
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate, CCGCode, [CCG name]
+
+UNION ALL 
+
+SELECT
+	'Provider' AS OrgType 
+	,OrgIDProv AS OrgCode
+	,Provider_Name AS OrgName
+	,ReportingPeriodStartDate
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Discharges ELSE 0 END) as AdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over60Days ELSE 0 END) as AdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Adult Acute' THEN Over90Days ELSE 0 END) as AdultAcute_Over90Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Discharges ELSE 0 END) as OlderAdultAcute_Discharges 
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over60Days ELSE 0 END) as OlderAdultAcute_Over60Days
+	,SUM(CASE WHEN BedType = 'Older adult acute' THEN Over90Days ELSE 0 END) as OlderAdultAcute_Over90Days
+
+FROM #Agg 
+
+GROUP BY ReportingPeriodStartDate, OrgIDProv, Provider_Name
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE ROLLING QUARTERLY COUNTS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('tempdb..#AcPatientsEveryone') IS NOT NULL
+DROP TABLE #AcPatientsEveryone
+
+SELECT
+	OrgType
+	,OrgCode
+	,OrgName
+	,ReportingPeriodStartDate
+	,SUM(SUM(AdultAcute_Discharges)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS AdultAcute_Discharges 
+	,SUM(SUM(AdultAcute_Over60Days)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS AdultAcute_Over60Days 
+	,SUM(SUM(AdultAcute_Over90Days)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS AdultAcute_Over90Days 
+	,SUM(SUM(OlderAdultAcute_Discharges)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS OlderAdultAcute_Discharges 
+	,SUM(SUM(OlderAdultAcute_Over60Days)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS OlderAdultAcute_Over60Days 
+	,SUM(SUM(OlderAdultAcute_Over90Days)) OVER (PARTITION BY OrgType, OrgCode, OrgName ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS OlderAdultAcute_Over90Days 
+
+INTO #AcPatientsEveryone 
+
+FROM #Output 
+
+GROUP BY OrgType, OrgCode, OrgName, ReportingPeriodStartDate
+
+-----------------------------------------------------------------------------------------
+
+/*>>>>>>>>>>>>>>>>>>>>
+ CCG POPULATIONS 
+>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+ IF OBJECT_ID ('tempdb..#Population') IS NOT NULL
+DROP TABLE #Population
+
+ SELECT 
+	b.[21_area_code]
+	,b.[21_CCG_Code] AS CCG_Code
+	,b.[21_CCG_Name] AS CCG_name
+	,b.[21_CCG_Code] AS New_Code
+	,a.Effective_Snapshot_Date
+	,SUM(Size) as [Population] 
+	,SUM(CASE WHEN Age IN ('18','19') OR Age LIKE '2_%' OR Age LIKE '3_%' OR  Age LIKE '4_%' OR Age LIKE '5_%' OR Age IN ('60','61','62','63','64')  THEN Size ELSE 0 END) as [Population 18-64] 
+	,SUM(CASE WHEN Age IN ('65','66','67','68','69')  OR Age LIKE '7_%' OR Age LIKE '8_%' OR Age = '90+' THEN Size ELSE 0 END) as [Population 65+] 
+	,ROW_NUMBER()OVER(PARTITION BY [21_Area_Code] ORDER BY Effective_Snapshot_Date desc) AS RN 
+ 
+ INTO #Population
+
+ FROM NHSE_UKHF.[Demography].[vw_ONS_Population_Estimates_For_CCGs_By_Year_Of_Age1] a 
+ left join [NHSE_Sandbox_Policy].[dbo].[CCG_E_Codes_Lookup] b on a.Area_Code collate SQL_Latin1_General_CP1_CI_AS = b.[20_area_code] collate SQL_Latin1_General_CP1_CI_AS
+
+
+  GROUP BY 
+  b.[21_area_code],
+  b.[21_CCG_Code], 
+  b.[21_CCG_Name],
+  a. Effective_Snapshot_Date
+
+IF OBJECT_ID ('tempdb..#Population2') IS NOT NULL
+DROP TABLE #Population2 
+
+ SELECT 
+	New_Code
+	,b.Organisation_Name
+	,b.STP_Code
+	,b.STP_Name
+	,b.Region_Code
+	,b.Region_Name
+	,SUM([Population]) AS [Population]
+	, SUM([Population 18-64]) AS [Population 18-64]
+	, SUM([Population 65+]) AS [Population 65+]
+ 
+ INTO #Population2
+
+ FROM #Population a 
+ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies b on a.New_Code = b.Organisation_Code
+ WHERE RN = 1 
+ AND New_Code IS NOT NULL 
+ GROUP BY New_Code, b.Organisation_Name, b.STP_Code, b.STP_Name, b.Region_Code, b.Region_Name
+
+
+IF OBJECT_ID ('[tempdb..#PopulationGrouped') IS NOT NULL
+DROP TABLE #PopulationGrouped 
+
+ SELECT 
+	'England' AS OrgType 
+	,'Eng' AS OrgCode 
+	,'England' AS OrgName 
+	,SUM([Population]) AS [Population]
+	, SUM([Population 18-64]) AS [Population 18-64]
+	, SUM([Population 65+]) AS [Population 65+]
+ 
+ INTO #PopulationGrouped 
+
+ FROM #Population2 
+
+
+ UNION ALL 
+
+ SELECT 
+	'Region' AS OrgType 
+	,Region_Code AS OrgCode 
+	,Region_Name AS OrgName 
+	,SUM([Population]) AS [Population]
+	, SUM([Population 18-64]) AS [Population 18-64]
+	, SUM([Population 65+]) AS [Population 65+]
+ 
+ FROM #Population2 
+
+ GROUP BY Region_Code, Region_Name
+
+  UNION ALL 
+
+ SELECT 
+	'STP' AS OrgType 
+	,STP_Code AS OrgCode 
+	,STP_Name AS OrgName 
+	,SUM([Population]) AS [Population]
+	, SUM([Population 18-64]) AS [Population 18-64]
+	, SUM([Population 65+]) AS [Population 65+]
+ 
+ FROM #Population2 
+
+ GROUP BY STP_Code, STP_Name
+
+   UNION ALL 
+
+ SELECT 
+	'CCG' AS OrgType 
+	,New_Code AS OrgCode 
+	,Organisation_Name AS OrgName 
+	,SUM([Population]) AS [Population]
+	, SUM([Population 18-64]) AS [Population 18-64]
+	, SUM([Population 65+]) AS [Population 65+]
+ 
+ FROM #Population2 
+
+ GROUP BY New_Code, Organisation_Name
+
+
+ -----------------------------------------------------------------------------------------
+
+/*>>>>>>>>>>>>>>>>>>>>
+ GROUPING CCG POPULATIONS & ACUTE PATIENTS
+>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+ IF OBJECT_ID ('tempdb..#LOS') IS NOT NULL
+DROP TABLE #LOS
+
+  SELECT a.[OrgType]
+      ,a.[OrgCode]
+      ,a.[OrgName]
+	  ,p.[Population]
+      ,p.[Population 18-64]
+      ,p.[Population 65+]
+      ,a.[ReportingPeriodStartDate]
+      ,a.[AdultAcute_Discharges]
+      ,a.[AdultAcute_Over60Days]
+      ,a.[AdultAcute_Over90Days]
+      ,a.[OlderAdultAcute_Discharges]
+      ,a.[OlderAdultAcute_Over60Days]
+      ,a.[OlderAdultAcute_Over90Days]
+
+INTO #LOS
+
+FROM #AcPatientsEveryone a
+
+LEFT JOIN #PopulationGrouped p ON a.OrgCode = p.OrgCode AND a.OrgType = p.OrgType
+
+
+-----------------------------------------------------------------------------------------
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ ROUNDING % & CREATING OUTPUT FILES
+ ADULT 60+ DAYS
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+IF OBJECT_ID ('tempdb..#AcPatientsLOS') IS NOT NULL
+DROP TABLE #AcPatientsLOS
+
+SELECT [OrgType]
+      ,[OrgCode]
+      ,[OrgName]
+	  ,[Population]
+      ,[Population 18-64]
+      ,[Population 65+]
+      ,[ReportingPeriodStartDate]
+      ,[AdultAcute_Discharges]
+      ,[AdultAcute_Over60Days]
+      ,[AdultAcute_Over90Days]
+      ,[OlderAdultAcute_Discharges]
+      ,[OlderAdultAcute_Over60Days]
+      ,[OlderAdultAcute_Over90Days]
+	,case when [Population 18-64] = 0 then null when [AdultAcute_Discharges] < 5 then NULL else cast(round(cast([AdultAcute_Discharges] as float)*100000/cast([Population 18-64] as float),1) as varchar) end as [AdultAcute_Discharges_Rate]
+	,case when [Population 18-64] = 0 then null when [AdultAcute_Over60Days] < 5 then NULL else cast(round(cast([AdultAcute_Over60Days] as float)*100000/cast([Population 18-64] as float),1) as varchar) end as [AdultAcute_Over60Days_Rate]
+	,case when [Population 18-64] = 0 then null when [AdultAcute_Over90Days] < 5 then NULL else cast(round(cast([AdultAcute_Over90Days] as float)*100000/cast([Population 18-64] as float),1) as varchar) end as [AdultAcute_Over90Days_Rate]
+	,case when [Population 65+] = 0 then null when [OlderAdultAcute_Discharges] < 5 then NULL else cast(round(cast([OlderAdultAcute_Discharges] as float)*100000/cast([Population 65+] as float),1) as varchar) end as [OlderAdultAcute_Discharges_Rate]
+	,case when [Population 65+] = 0 then null when [OlderAdultAcute_Over60Days] < 5 then NULL else cast(round(cast([OlderAdultAcute_Over60Days] as float)*100000/cast([Population 65+] as float),1) as varchar) end as [OlderAdultAcute_Over60Days_Rate]
+	,case when [Population 65+] = 0 then null when [OlderAdultAcute_Over90Days] < 5 then NULL else cast(round(cast([OlderAdultAcute_Over90Days] as float)*100000/cast([Population 65+] as float),1) as varchar) end as [OlderAdultAcute_Over90Days_Rate]
+INTO #AcPatientsLOS
+FROM #LOS
+
+IF OBJECT_ID ('tempdb..#AdultAcute_Over60Days') IS NOT NULL
+DROP TABLE #AdultAcute_Over60Days
+
+SELECT  OrgType,
+        OrgCode,
+		ReportingPeriodStartDate, 
+		[AdultAcute_Over60Days],
+		[Population 18-64],
+		[AdultAcute_Over60Days_Rate]
+INTO #AdultAcute_Over60Days
+FROM #AcPatientsLOS
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CODE TO ADD DATA FROM JULY 2021 ONWARDS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DECLARE @ENDRP DATETIME
+DECLARE @STARTRP DATETIME
+
+SET @ENDRP = (SELECT MAX(REPORTING_PERIOD_END)
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]
+where [STATUS] <> 'provisional')
+
+SET @STARTRP = (SELECT DATEADD(mm,-11,@ENDRP))
+
+--England
+INSERT INTO #AdultAcute_Over60Days
+
+select 
+BREAKDOWN as [OrgType],
+case when PRIMARY_LEVEL = 'England' then 'Eng' else PRIMARY_LEVEL end as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(case when MEASURE_ID = 'MHS100' then MEASURE_VALUE end) as 'AdultAcute_Over60Days',
+[Population 18-64],
+sum(case when MEASURE_ID = 'MHS100a' then MEASURE_VALUE end) as [AdultAcute_Over60Days_Rate] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgName
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID IN ('MHS100','MHS100a')
+and BREAKDOWN in ('England')
+
+group by
+BREAKDOWN,
+PRIMARY_LEVEL,
+REPORTING_PERIOD_END,
+[Population 18-64]
+
+--CCG level
+UNION 
+
+select 
+case when BREAKDOWN = 'CCG - Residence' then 'CCG' end as [OrgType],
+PRIMARY_LEVEL as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(case when MEASURE_ID = 'MHS100' then MEASURE_VALUE end) as 'AdultAcute_Over60Days',
+[Population 18-64],
+case
+	when sum(case when MEASURE_ID = 'MHS100' then MEASURE_VALUE end)<5 then NULL
+	else sum(case when MEASURE_ID = 'MHS100a' then MEASURE_VALUE end) end as [AdultAcute_Over60Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+
+where 
+REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID IN ('MHS100','MHS100a')
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+BREAKDOWN,
+PRIMARY_LEVEL,
+REPORTING_PERIOD_END,
+[Population 18-64]
+
+--Region level
+UNION 
+
+select 
+'Region' as [OrgType],
+c.Region_Code as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(MEASURE_VALUE) as 'AdultAcute_Over60Days',
+sum(distinct[Population 18-64]) as 'Population 18-64',
+(sum(MEASURE_VALUE) / sum(distinct[Population 18-64]))*100000 as [AdultAcute_Over60Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c on c.Organisation_Code = a.PRIMARY_LEVEL
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'MHS100'
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+Region_Code,
+REPORTING_PERIOD_END
+
+--STP level
+UNION 
+
+select 
+'STP' as [OrgType],
+c.STP_Code as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(MEASURE_VALUE) as 'AdultAcute_Over60Days',
+sum(distinct[Population 18-64]) as 'Population 18-64',
+(sum(MEASURE_VALUE) / sum(distinct[Population 18-64]))*100000 as [AdultAcute_Over60Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c on c.Organisation_Code = a.PRIMARY_LEVEL
+
+where 
+REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'MHS100'
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+STP_Code,
+REPORTING_PERIOD_END
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ ROUNDING % & CREATING OUTPUT FILES
+ OLDER ADULT 90+ DAYS
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+IF OBJECT_ID ('tempdb..#OlderAdultAcute_Over90Days') IS NOT NULL
+DROP TABLE #OlderAdultAcute_Over90Days
+
+SELECT  OrgType,
+        OrgCode,
+		ReportingPeriodStartDate, 
+		[OlderAdultAcute_Over90Days],
+		[Population 65+],
+		[OlderAdultAcute_Over90Days_Rate]
+INTO #OlderAdultAcute_Over90Days
+FROM #AcPatientsLOS
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CODE TO ADD DATA FROM JULY 2021 ONWARDS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--England
+INSERT INTO #OlderAdultAcute_Over90Days
+
+select 
+BREAKDOWN as [OrgType],
+case when PRIMARY_LEVEL = 'England' then 'Eng' else PRIMARY_LEVEL end as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(case when MEASURE_ID = 'MHS103' then MEASURE_VALUE end) as 'OlderAdultAcute_Over90Days',
+[Population 65+],
+sum(case when MEASURE_ID = 'MHS103a' then MEASURE_VALUE end) as [OlderAdultAcute_Over90Days_Rate] 
+
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgName
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID IN ('MHS103','MHS103a')
+and BREAKDOWN in ('England')
+
+group by
+BREAKDOWN,
+PRIMARY_LEVEL,
+REPORTING_PERIOD_END,
+[Population 65+]
+
+--CCG level
+UNION 
+
+select 
+case when BREAKDOWN = 'CCG - Residence' then 'CCG' end as [OrgType],
+PRIMARY_LEVEL as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(case when MEASURE_ID = 'MHS103' then MEASURE_VALUE end) as 'OlderAdultAcute_Over90Days',
+[Population 65+],
+case
+	when sum(case when MEASURE_ID = 'MHS103' then MEASURE_VALUE end)<5 then NULL
+	else sum(case when MEASURE_ID = 'MHS103a' then MEASURE_VALUE end) end as [OlderAdultAcute_Over90Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+
+where 
+REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID IN ('MHS103','MHS103a')
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+BREAKDOWN,
+PRIMARY_LEVEL,
+REPORTING_PERIOD_END,
+[Population 65+]
+
+--Region level
+UNION 
+
+select 
+'Region' as [OrgType],
+c.Region_Code as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(MEASURE_VALUE) as 'OlderAdultAcute_Over90Days',
+sum(distinct[Population 65+]) as 'Population 65+',
+(sum(MEASURE_VALUE) / sum(distinct[Population 65+]))*100000 as [OlderAdultAcute_Over90Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c on c.Organisation_Code = a.PRIMARY_LEVEL
+
+where REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'MHS103'
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+Region_Code,
+REPORTING_PERIOD_END
+
+--STP level
+UNION 
+
+select 
+'STP' as [OrgType],
+c.STP_Code as [OrgCode], 
+DATEADD(month, DATEDIFF(month, 1, Reporting_Period_End), 0) AS ReportingperiodStartDate,
+sum(MEASURE_VALUE) as 'OlderAdultAcute_Over90Days',
+sum(distinct[Population 65+]) as 'Population 65+',
+(sum(MEASURE_VALUE) / sum(distinct[Population 65+]))*100000 as [OlderAdultAcute_Over90Days_Rate] 
+from [NHSE_Sandbox_MentalHealth].[dbo].[Staging_UnsuppressedMHSDSPublicationFiles]a
+left join [NHSE_Sandbox_Policy].dbo.[Population]b  on a.PRIMARY_LEVEL = b.OrgCode
+left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c on c.Organisation_Code = a.PRIMARY_LEVEL
+
+where 
+REPORTING_PERIOD_END between @STARTRP and @ENDRP
+and MEASURE_ID = 'MHS103'
+and BREAKDOWN in ('CCG - Residence')
+
+group by
+STP_Code,
+REPORTING_PERIOD_END
+
+
+select * from #AdultAcute_Over60Days
+select * from #OlderAdultAcute_Over90Days

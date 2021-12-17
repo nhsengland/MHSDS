@@ -1,0 +1,863 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IAPT MONTHLY INDICATORS
+
+Code pulls most recent 15 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+IF OBJECT_ID ('tempdb..#National') IS NOT NULL DROP TABLE #National
+IF OBJECT_ID ('tempdb..#Regional') IS NOT NULL DROP TABLE #Regional
+IF OBJECT_ID ('tempdb..#STP') IS NOT NULL DROP TABLE #STP
+IF OBJECT_ID ('tempdb..#CCG') IS NOT NULL DROP TABLE #CCG
+IF OBJECT_ID ('tempdb..#Provider') IS NOT NULL DROP TABLE #Provider
+
+USE [NHSE_IAPT_v2]
+
+-- SET UP TABLES
+-- Below is the structure of the table this script outputs. Rounding and suppression is applied to sub-national figures at the end of this script.
+
+CREATE TABLE #National
+ (
+ [Month] varchar(100),
+ [GroupType] varchar(100),
+ [Organisation Code] varchar(100),
+ [Count_FirstTreatment] INT,
+ [Count_Recovery] INT,
+ [Count_FinishedCourseTreatment] INT,
+ [Count_NotAtCaseness] INT,
+ [Percentage_Recovery] FLOAT(4), 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment] INT,
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment] INT,  
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment] FLOAT(4),
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment] FLOAT(4),
+ [Count_FirstToSecondTreatmentOver28days] INT, 
+ [Count_FirstToSecondTreatmentOver90days] INT,
+ [Count_SecondTreatment] INT,
+ [Percentage_FirstToSecondTreatmentOver90days] FLOAT(4))
+
+CREATE TABLE #Regional
+ (
+ [Month] varchar(100),
+ [GroupType] varchar(100),
+ [Organisation Code] varchar(100),
+ [Count_FirstTreatment] INT,
+ [Count_Recovery] INT,
+ [Count_FinishedCourseTreatment] INT,
+ [Count_NotAtCaseness] INT,
+ [Percentage_Recovery] FLOAT(4), 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment] INT,
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment] INT,  
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment] FLOAT(4),
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment] FLOAT(4),
+ [Count_FirstToSecondTreatmentOver28days] INT, 
+ [Count_FirstToSecondTreatmentOver90days] INT,
+ [Count_SecondTreatment] INT,
+ [Percentage_FirstToSecondTreatmentOver90days] FLOAT(4))
+
+CREATE TABLE #STP
+ (
+ [Month] varchar(100),
+ [GroupType] varchar(100),
+ [Organisation Code] varchar(100),
+ [Count_FirstTreatment] INT,
+ [Count_Recovery] INT,
+ [Count_FinishedCourseTreatment] INT,
+ [Count_NotAtCaseness] INT,
+ [Percentage_Recovery] FLOAT(4), 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment] INT,
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment] INT,  
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment] FLOAT(4),
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment] FLOAT(4),
+ [Count_FirstToSecondTreatmentOver28days] INT, 
+ [Count_FirstToSecondTreatmentOver90days] INT,
+ [Count_SecondTreatment] INT,
+ [Percentage_FirstToSecondTreatmentOver90days] FLOAT(4))
+ 
+CREATE TABLE #CCG
+ (
+ [Month] varchar(100),
+ [GroupType] varchar(100),
+ [Organisation Code] varchar(100),
+ [Count_FirstTreatment] INT,
+ [Count_Recovery] INT,
+ [Count_FinishedCourseTreatment] INT,
+ [Count_NotAtCaseness] INT,
+ [Percentage_Recovery] FLOAT(4), 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment] INT,
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment] INT, 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment] FLOAT(4),
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment] FLOAT(4),
+ [Count_FirstToSecondTreatmentOver28days] INT, 
+ [Count_FirstToSecondTreatmentOver90days] INT,
+ [Count_SecondTreatment] INT,
+ [Percentage_FirstToSecondTreatmentOver90days] FLOAT(4))
+
+CREATE TABLE #Provider
+ (
+ [Month] varchar(100),
+ [GroupType] varchar(100),
+ [Organisation Code] varchar(100),
+ [Count_FirstTreatment] INT,
+ [Count_Recovery] INT,
+ [Count_FinishedCourseTreatment] INT,
+ [Count_NotAtCaseness] INT,
+ [Percentage_Recovery] FLOAT(4), 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment] INT,
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment] INT, 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment] FLOAT(4),
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment] FLOAT(4),
+ [Count_FirstToSecondTreatmentOver28days] INT, 
+ [Count_FirstToSecondTreatmentOver90days] INT,
+ [Count_SecondTreatment] INT,
+ [Percentage_FirstToSecondTreatmentOver90days] FLOAT(4))
+
+-- LOOP TO SHOW MOST RECENT 15 MONTHS WORTH OF DATA
+
+DECLARE @i int = -1
+WHILE @i > -15
+
+BEGIN 
+
+USE [NHSE_IAPT_v2]
+
+DECLARE @Period_Start DATE
+DECLARE @Period_End DATE
+
+SET @Period_Start = (SELECT DATEADD(MONTH,@i,MAX([ReportingPeriodStartDate])) FROM [IDS000_Header])
+SET @Period_End = (SELECT eomonth(DATEADD(MONTH,@i,MAX([ReportingPeriodEndDate]))) FROM [dbo].[IDS000_Header])
+
+PRINT @Period_Start
+PRINT @Period_End
+
+-- ADD NATIONAL FIGURES
+
+USE [NHSE_IAPT]
+
+INSERT INTO #National
+
+(
+ [Month],
+ [GroupType],
+ [Organisation Code],
+ [Count_FirstTreatment],
+ [Count_Recovery],
+ [Count_FinishedCourseTreatment],
+ [Count_NotAtCaseness],
+ [Percentage_Recovery], 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment], 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment],
+ [Count_FirstToSecondTreatmentOver28days], 
+ [Count_FirstToSecondTreatmentOver90days],
+ [Count_SecondTreatment],
+ [Percentage_FirstToSecondTreatmentOver90days])
+
+SELECT
+
+DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar) AS Month,
+'National' AS GroupType,
+'ENGLAND' AS 'Organisation Code'
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS Count_Recovery
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FinishedCourseTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS Count_NotAtCaseness
+		
+		,CASE WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END)
+		-COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)
+		-CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END)AS float)))*100 END
+		AS Percentage_Recovery
+				
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+		<=126 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >28 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver28days
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver90days
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_SecondTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN  TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstToSecondTreatmentOver90days
+
+FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+		LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c2 ON r.OrgIDComm = c2.IC_CCG
+		LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgID_Provider = o1.Organisation_Code
+		LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_CCGToSTP] s ON c2.CCG21 = s.CCG_Code
+
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+		AND UsePathway_Flag = 'True'
+		AND i.IsLatest = '1'
+GROUP BY DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar)
+
+ 
+ -- ADD REGIONAL FIGURES
+
+INSERT INTO #REGIONAL
+(
+ [Month],
+ [GroupType],
+ [Organisation Code],
+ [Count_FirstTreatment],
+ [Count_Recovery],
+ [Count_FinishedCourseTreatment],
+ [Count_NotAtCaseness],
+ [Percentage_Recovery], 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment], 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment],
+ [Count_FirstToSecondTreatmentOver28days], 
+ [Count_FirstToSecondTreatmentOver90days],
+ [Count_SecondTreatment],
+ [Percentage_FirstToSecondTreatmentOver90days])
+
+SELECT
+
+DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar) AS Month,
+'Regional' AS GroupType,
+CASE WHEN CCG21 IN ('07P','09A','07W','08C','08E','08G','07Y','08Y','93C','07L','07T','08F','08M','08N','08V','08W','72Q','36L', 'A3A8R', 'W2U3Z') THEN 'Y56'							
+	WHEN CCG21 IN ('11N','15N','11X','15C','92G','11J','11M')	THEN 'Y58'																			
+	WHEN CCG21 IN ('91Q','99M','10C','15D','10K','10L','10J','10R','10V','10X','11A','10Q','15A','14Y','92A','09D','97R','70F','D4U1Y','D9Y0V') THEN 'Y59'										
+	WHEN CCG21 IN ('71E','52R','04Y','05D','05G','05Q','05V','05W','05N','05X','15M','03W','04C','04V','05C','05L','05Y','06A','15E','05A','05R','05H','18C','78H','B2M3M','M2L0M','D2P2L') THEN 'Y60'				
+	WHEN CCG21 IN ('06H','26A','06L','06T','07K','06F','06P','04F','06K','06N','07H','99E','99F','06Q','99G','07G','M1J4Y') THEN 'Y61'												
+	WHEN CCG21 IN ('00T','00V','01D','00Y','01G','01W','01Y','02A','02H','14L','01F','01J','99A','01T','01V','01X','02E','12F','27D','00Q','00R','00X','01A','02G','02M','01E','01K') THEN 'Y62'	
+	WHEN CCG21 IN ('02P','02Q','02X','03L','03N','99C','00L','00N','00P','13T','01H','84H','16C','02Y','03F','03H','03K','03Q','42D','02T','03A','03J','03R','15F','36J','X2C4Y') THEN 'Y63'	
+	ELSE 'Other' END AS 'Organisation Code'	
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS Count_Recovery
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FinishedCourseTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS Count_NotAtCaseness
+		
+		,CASE WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END)
+		-COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)
+		-CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END)AS float)))*100 END
+		AS Percentage_Recovery
+				
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+		<=126 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >28 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver28days
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver90days
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_SecondTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN  TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstToSecondTreatmentOver90days
+
+
+FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+		LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c2 ON r.OrgIDComm = c2.IC_CCG
+		LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgID_Provider = o1.Organisation_Code
+		LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_CCGToSTP] s ON c2.CCG21 = s.CCG_Code
+
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+		AND UsePathway_Flag = 'True'
+		AND i.IsLatest = '1'
+
+ GROUP BY DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar),
+CASE WHEN CCG21 IN ('07P','09A','07W','08C','08E','08G','07Y','08Y','93C','07L','07T','08F','08M','08N','08V','08W','72Q','36L', 'A3A8R', 'W2U3Z') THEN 'Y56'							
+	WHEN CCG21 IN ('11N','15N','11X','15C','92G','11J','11M')	THEN 'Y58'																			
+	WHEN CCG21 IN ('91Q','99M','10C','15D','10K','10L','10J','10R','10V','10X','11A','10Q','15A','14Y','92A','09D','97R','70F','D4U1Y','D9Y0V') THEN 'Y59'										
+	WHEN CCG21 IN ('71E','52R','04Y','05D','05G','05Q','05V','05W','05N','05X','15M','03W','04C','04V','05C','05L','05Y','06A','15E','05A','05R','05H','18C','78H','B2M3M','M2L0M','D2P2L') THEN 'Y60'				
+	WHEN CCG21 IN ('06H','26A','06L','06T','07K','06F','06P','04F','06K','06N','07H','99E','99F','06Q','99G','07G','M1J4Y') THEN 'Y61'												
+	WHEN CCG21 IN ('00T','00V','01D','00Y','01G','01W','01Y','02A','02H','14L','01F','01J','99A','01T','01V','01X','02E','12F','27D','00Q','00R','00X','01A','02G','02M','01E','01K') THEN 'Y62'	
+	WHEN CCG21 IN ('02P','02Q','02X','03L','03N','99C','00L','00N','00P','13T','01H','84H','16C','02Y','03F','03H','03K','03Q','42D','02T','03A','03J','03R','15F','36J','X2C4Y') THEN 'Y63'	
+	ELSE 'Other' END
+
+--ADD STP FIGURES
+
+INSERT INTO #STP
+
+(
+ [Month],
+ [GroupType],
+ [Organisation Code],
+ [Count_FirstTreatment],
+ [Count_Recovery],
+ [Count_FinishedCourseTreatment],
+ [Count_NotAtCaseness],
+ [Percentage_Recovery], 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment], 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment],
+ [Count_FirstToSecondTreatmentOver28days], 
+ [Count_FirstToSecondTreatmentOver90days],
+ [Count_SecondTreatment],
+ [Percentage_FirstToSecondTreatmentOver90days])
+
+SELECT
+
+DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar) AS Month,
+		'STP' AS GroupType,
+	CASE WHEN CCG21 IN ('00T','00V','01D','00Y','01G','01W','01Y','02A','02H','14L') THEN 'E54000007'
+	WHEN CCG21 IN ('01F','01J','99A','01T','01V','01X','02E','12F','27D') THEN 'E54000008'
+	WHEN CCG21 IN ('02P','02Q','02X','03L','03N')	THEN 'E54000009'
+	WHEN CCG21 IN ('04Y','05D','05G','05Q','05V','05W') THEN 'E54000010'			
+	WHEN CCG21 IN ('05N','05X', 'M2L0M') THEN 'E54000011'
+	WHEN CCG21 = '15M' THEN 'E54000012'					
+	WHEN CCG21 = '71E' THEN 'E54000013'						
+	WHEN CCG21 = '52R' THEN 'E54000014'								
+	WHEN CCG21 IN ('03W','04C','04V')	THEN 'E54000015'				
+	WHEN CCG21 IN ('05C','05L','05Y','06A', 'D2P2L') THEN 'E54000016'					
+	WHEN CCG21 = '15E' THEN 'E54000017'								
+	WHEN CCG21 IN ('05A','05R','05H','B2M3M')	THEN 'E54000018'			
+	WHEN CCG21 = '18C' THEN 'E54000019'		
+	WHEN CCG21 = '78H' THEN 'E54000020'							
+	WHEN CCG21 = '06H' THEN 'E54000021'							
+	WHEN CCG21 = '26A' THEN 'E54000022'							
+	WHEN CCG21 IN ('06L','06T','07K') THEN 'E54000023'							
+	WHEN CCG21 IN ('06F','06P','04F', 'M1J4Y') THEN 'E54000024'							
+	WHEN CCG21 IN ('06K','06N','07H')	THEN 'E54000025'						
+	WHEN CCG21 IN ('99E','99F','06Q','99G','07G') THEN 'E54000026'					
+	WHEN CCG21 IN ('07P','09A','07W','08C','08E','08G','07Y','08Y', 'W2U3Z') THEN 'E54000027'	
+	WHEN CCG21 = '93C' THEN 'E54000028'								
+	WHEN CCG21 IN ('07L','07T','08F','08M','08N','08V','08W', 'A3A8R') THEN 'E54000029'			
+	WHEN CCG21 = '72Q' THEN 'E54000030'								
+	WHEN CCG21 = '36L' THEN 'E54000031'									
+	WHEN CCG21 = '91Q' THEN 'E54000032'									
+	WHEN CCG21 IN ('99M','10C','15D','D4U1Y') THEN 'E54000034'							
+	WHEN CCG21 = '11N' THEN 'E54000036'							
+	WHEN CCG21 = '15N' THEN 'E54000037'								
+	WHEN CCG21 = '11X' THEN 'E54000038'									
+	WHEN CCG21 = '15C' THEN 'E54000039'									
+	WHEN CCG21 = '92G' THEN 'E54000040'									
+	WHEN CCG21 = '11J' THEN 'E54000041'								
+	WHEN CCG21 IN ('10K','10L','10J','10R','10V','10X','11A', 'D9Y0V')	THEN 'E54000042'		
+	WHEN CCG21 = '11M' THEN 'E54000043'						
+	WHEN CCG21 IN ('10Q','15A','14Y') THEN 'E54000044'							
+	WHEN CCG21 IN ('00Q','00R','00X','01A','02G','02M','01E','01K') THEN 'E54000048'	
+	WHEN CCG21 IN ('99C','00L','00N','00P','13T','01H','84H','16C') THEN 'E54000050'
+	WHEN CCG21 IN ('02Y','03F','03H','03K','03Q','42D') THEN 'E54000051'
+	WHEN CCG21 = '92A' THEN 'E54000052'								
+	WHEN CCG21 IN ('09D','97R','70F') THEN 'E54000053'			
+	WHEN CCG21 IN ('02T','03A','03J','03R','15F','36J', 'X2C4Y') THEN 	'E54000054'	ELSE 'Other' END as 'Organisation code'
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS Count_Recovery
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FinishedCourseTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS Count_NotAtCaseness
+		
+		,CASE WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END)
+		-COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)
+		-CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END)AS float)))*100 END
+		AS Percentage_Recovery
+				
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+		<=126 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >28 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver28days
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver90days
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_SecondTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN  TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstToSecondTreatmentOver90days
+
+
+FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+		LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c2 ON r.OrgIDComm = c2.IC_CCG
+		LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgID_Provider = o1.Organisation_Code
+		LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_CCGToSTP] s ON c2.CCG21 = s.CCG_Code
+
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+		AND UsePathway_Flag = 'True'
+		AND i.IsLatest = '1'
+
+GROUP BY DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar),CASE WHEN CCG21 IN ('00T','00V','01D','00Y','01G','01W','01Y','02A','02H','14L') THEN 'E54000007'
+	WHEN CCG21 IN ('01F','01J','99A','01T','01V','01X','02E','12F','27D') THEN 'E54000008'
+	WHEN CCG21 IN ('02P','02Q','02X','03L','03N')	THEN 'E54000009'
+	WHEN CCG21 IN ('04Y','05D','05G','05Q','05V','05W') THEN 'E54000010'			
+	WHEN CCG21 IN ('05N','05X', 'M2L0M') THEN 'E54000011'
+	WHEN CCG21 = '15M' THEN 'E54000012'					
+	WHEN CCG21 = '71E' THEN 'E54000013'						
+	WHEN CCG21 = '52R' THEN 'E54000014'								
+	WHEN CCG21 IN ('03W','04C','04V')	THEN 'E54000015'				
+	WHEN CCG21 IN ('05C','05L','05Y','06A', 'D2P2L') THEN 'E54000016'					
+	WHEN CCG21 = '15E' THEN 'E54000017'								
+	WHEN CCG21 IN ('05A','05R','05H','B2M3M')	THEN 'E54000018'			
+	WHEN CCG21 = '18C' THEN 'E54000019'		
+	WHEN CCG21 = '78H' THEN 'E54000020'							
+	WHEN CCG21 = '06H' THEN 'E54000021'							
+	WHEN CCG21 = '26A' THEN 'E54000022'							
+	WHEN CCG21 IN ('06L','06T','07K') THEN 'E54000023'							
+	WHEN CCG21 IN ('06F','06P','04F', 'M1J4Y') THEN 'E54000024'							
+	WHEN CCG21 IN ('06K','06N','07H')	THEN 'E54000025'						
+	WHEN CCG21 IN ('99E','99F','06Q','99G','07G') THEN 'E54000026'					
+	WHEN CCG21 IN ('07P','09A','07W','08C','08E','08G','07Y','08Y', 'W2U3Z') THEN 'E54000027'	
+	WHEN CCG21 = '93C' THEN 'E54000028'								
+	WHEN CCG21 IN ('07L','07T','08F','08M','08N','08V','08W', 'A3A8R') THEN 'E54000029'			
+	WHEN CCG21 = '72Q' THEN 'E54000030'								
+	WHEN CCG21 = '36L' THEN 'E54000031'									
+	WHEN CCG21 = '91Q' THEN 'E54000032'									
+	WHEN CCG21 IN ('99M','10C','15D','D4U1Y') THEN 'E54000034'							
+	WHEN CCG21 = '11N' THEN 'E54000036'							
+	WHEN CCG21 = '15N' THEN 'E54000037'								
+	WHEN CCG21 = '11X' THEN 'E54000038'									
+	WHEN CCG21 = '15C' THEN 'E54000039'									
+	WHEN CCG21 = '92G' THEN 'E54000040'									
+	WHEN CCG21 = '11J' THEN 'E54000041'								
+	WHEN CCG21 IN ('10K','10L','10J','10R','10V','10X','11A', 'D9Y0V')	THEN 'E54000042'		
+	WHEN CCG21 = '11M' THEN 'E54000043'						
+	WHEN CCG21 IN ('10Q','15A','14Y') THEN 'E54000044'							
+	WHEN CCG21 IN ('00Q','00R','00X','01A','02G','02M','01E','01K') THEN 'E54000048'	
+	WHEN CCG21 IN ('99C','00L','00N','00P','13T','01H','84H','16C') THEN 'E54000050'
+	WHEN CCG21 IN ('02Y','03F','03H','03K','03Q','42D') THEN 'E54000051'
+	WHEN CCG21 = '92A' THEN 'E54000052'								
+	WHEN CCG21 IN ('09D','97R','70F') THEN 'E54000053'			
+	WHEN CCG21 IN ('02T','03A','03J','03R','15F','36J', 'X2C4Y') THEN 	'E54000054'	ELSE 'Other' END
+
+--ADD CCG FIGURES
+
+INSERT INTO #CCG
+
+(
+ [Month],
+ [GroupType],
+ [Organisation Code],
+ [Count_FirstTreatment],
+ [Count_Recovery],
+ [Count_FinishedCourseTreatment],
+ [Count_NotAtCaseness],
+ [Percentage_Recovery], 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment], 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment],
+ [Count_FirstToSecondTreatmentOver28days], 
+ [Count_FirstToSecondTreatmentOver90days],
+ [Count_SecondTreatment],
+ [Percentage_FirstToSecondTreatmentOver90days])
+
+SELECT
+
+		DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar) AS Month,
+		'CCG' AS GroupType,
+		CASE WHEN CCG21 IS NOT NULL THEN CCG21 ELSE 'Other' END AS 'Organisation Code'
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS Count_Recovery
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FinishedCourseTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS Count_NotAtCaseness
+		
+		,CASE WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END)
+		-COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)
+		-CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END)AS float)))*100 END
+		AS Percentage_Recovery
+				
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+		<=126 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >28 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver28days
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver90days
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_SecondTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN  TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstToSecondTreatmentOver90days
+
+
+FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+		LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c2 ON r.OrgIDComm = c2.IC_CCG
+		LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgID_Provider = o1.Organisation_Code
+		LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_CCGToSTP] s ON c2.CCG21 = s.CCG_Code
+
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+		AND UsePathway_Flag = 'True'
+		AND i.IsLatest = '1'
+
+GROUP BY DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar),
+			CASE WHEN CCG21 IS NOT NULL THEN CCG21 ELSE 'Other' END
+
+
+--ADD PROVIDER FIGURES
+
+INSERT INTO #Provider
+(
+ [Month],
+ [GroupType],
+ [Organisation Code],
+ [Count_FirstTreatment],
+ [Count_Recovery],
+ [Count_FinishedCourseTreatment],
+ [Count_NotAtCaseness],
+ [Percentage_Recovery], 
+ [Count_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Count_FirstTreatment18WeeksFinishedCourseTreatment], 
+ [Percentage_FirstTreatment6WeeksFinishedCourseTreatment],
+ [Percentage_FirstTreatment18WeeksFinishedCourseTreatment],
+ [Count_FirstToSecondTreatmentOver28days], 
+ [Count_FirstToSecondTreatmentOver90days],
+ [Count_SecondTreatment],
+ [Percentage_FirstToSecondTreatmentOver90days])
+
+SELECT
+
+		DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar) AS Month,
+		'Provider' AS GroupType,
+		CASE WHEN r.OrgID_Provider IS NOT NULL THEN r.OrgID_Provider ELSE 'Other' END AS 'Organisation Code'
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS Count_Recovery
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_FinishedCourseTreatment
+
+		,COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS Count_NotAtCaseness
+		
+		,CASE WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END)
+		-COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' THEN  r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)
+		-CAST(COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' THEN r.PathwayID ELSE NULL END)AS float)))*100 END
+		AS Percentage_Recovery
+				
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+		<=126 THEN r.PathwayID ELSE NULL END) AS Count_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=42 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])
+			<=126 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >28 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver28days
+
+		,COUNT( DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS Count_FirstToSecondTreatmentOver90days
+
+		,COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS Count_SecondTreatment
+
+		,CASE WHEN COUNT(DISTINCT CASE WHEN  TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) = 0 THEN NULL
+		WHEN COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) = 0 THEN NULL 
+		ELSE 
+
+		(CAST(COUNT( DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 THEN r.PathwayID ELSE NULL END) AS float)
+		/(CAST(COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS float)))*100 END
+		AS Percentage_FirstToSecondTreatmentOver90days
+
+
+FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+		INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+		LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] c2 ON r.OrgIDComm = c2.IC_CCG
+		LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgID_Provider = o1.Organisation_Code
+		LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_CCGToSTP] s ON c2.CCG21 = s.CCG_Code
+
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+		AND UsePathway_Flag = 'True'
+		AND i.IsLatest = '1'
+
+GROUP BY DATENAME(m, h.[ReportingPeriodStartDate]) + ' ' + CAST(DATEPART(yyyy, h.[ReportingPeriodStartDate]) AS varchar),
+			CASE WHEN r.OrgID_Provider IS NOT NULL THEN r.OrgID_Provider ELSE 'Other' END
+
+SET @i = @i - 1
+
+END
+
+
+-- Here rounding and suppression is applied to aggregate metrics. Proportions are unchanged.  
+
+SELECT
+
+eomonth([Month]) as [Month],
+case when GroupType = 'national' then 'England' else GroupType end as 'GroupType',
+case when [Organisation Code] = 'England' then 'Eng' else [Organisation Code] end as 'Organisation Code',
+CAST([Count_FirstTreatment] AS VARCHAR) AS 'Count_FirstTreatment',
+CAST([Count_Recovery] AS VARCHAR) AS Count_Recovery,
+CAST(Count_FinishedCourseTreatment  AS VARCHAR) AS Count_FinishedCourseTreatment,
+CAST(Count_NotAtCaseness  AS VARCHAR) AS Count_NotAtCaseness,
+ROUND(Percentage_Recovery,1) AS 'Percentage_Recovery',
+CAST([Count_FirstTreatment6WeeksFinishedCourseTreatment] AS VARCHAR) AS Count_FirstTreatment6WeeksFinishedCourseTreatment,
+CAST([Count_FirstTreatment18WeeksFinishedCourseTreatment] AS VARCHAR) AS Count_FirstTreatment18WeeksFinishedCourseTreatment,
+ROUND(Percentage_FirstTreatment6WeeksFinishedCourseTreatment,1) AS 'Percentage_FirstTreatment6WeeksFinishedCourseTreatment',
+ROUND(Percentage_FirstTreatment18WeeksFinishedCourseTreatment,1) AS 'Percentage_FirstTreatment18WeeksFinishedCourseTreatment',
+CAST([Count_FirstToSecondTreatmentOver28days]  AS VARCHAR) AS Count_FirstToSecondTreatmentOver28days,
+CAST([Count_FirstToSecondTreatmentOver90days]  AS VARCHAR) AS Count_FirstToSecondTreatmentOver90days,
+CAST([Count_SecondTreatment]  AS VARCHAR) AS Count_SecondTreatment,
+ROUND(Percentage_FirstToSecondTreatmentOver90days,1) AS 'Percentage_FirstToSecondTreatmentOver90days'
+
+FROM #National
+ 
+
+UNION 
+
+SELECT
+
+eomonth([Month]),
+case when GroupType = 'regional' then 'Region' else GroupType end as 'GroupType',
+[Organisation Code],
+CASE WHEN [Count_FirstTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment]+2) /5,0)*5 AS INT) AS VARCHAR), NULL) END AS 'Count_FirstTreatment',
+CASE WHEN Count_Recovery < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_Recovery +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_Recovery,
+CASE WHEN Count_FinishedCourseTreatment < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_FinishedCourseTreatment +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FinishedCourseTreatment,
+CASE WHEN Count_NotAtCaseness < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_NotAtCaseness +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_NotAtCaseness,
+CASE WHEN Count_Recovery <5 then NULL ELSE ROUND(Percentage_Recovery, 0) END AS 'Percentage_Recovery',
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment6WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment18WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment6WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment18WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver28days] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver28days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver28days,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver90days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver90days,
+CASE WHEN [Count_SecondTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_SecondTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_SecondTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days] <5 then NULL ELSE ROUND(Percentage_FirstToSecondTreatmentOver90days, 0) END AS Percentage_FirstToSecondTreatmentOver90days
+
+FROM #Regional
+
+UNION
+
+SELECT
+
+eomonth([Month]),
+GroupType,
+[Organisation Code],
+CASE WHEN [Count_FirstTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment]+2) /5,0)*5 AS INT) AS VARCHAR), NULL) END AS 'Count_FirstTreatment',
+CASE WHEN Count_Recovery < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_Recovery +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_Recovery,
+CASE WHEN Count_FinishedCourseTreatment < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_FinishedCourseTreatment +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FinishedCourseTreatment,
+CASE WHEN Count_NotAtCaseness < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_NotAtCaseness +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_NotAtCaseness,
+CASE WHEN Count_Recovery <5 then NULL ELSE ROUND(Percentage_Recovery, 0) END AS 'Percentage_Recovery',
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment6WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment18WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment6WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment18WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver28days] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver28days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver28days,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver90days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver90days,
+CASE WHEN [Count_SecondTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_SecondTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_SecondTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days] <5 then NULL ELSE ROUND(Percentage_FirstToSecondTreatmentOver90days, 0) END AS Percentage_FirstToSecondTreatmentOver90days
+
+FROM #STP
+
+UNION
+
+SELECT
+
+eomonth([Month]),
+GroupType,
+[Organisation Code],
+CASE WHEN [Count_FirstTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment]+2) /5,0)*5 AS INT) AS VARCHAR), NULL) END AS 'Count_FirstTreatment',
+CASE WHEN Count_Recovery < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_Recovery +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_Recovery,
+CASE WHEN Count_FinishedCourseTreatment < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_FinishedCourseTreatment +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FinishedCourseTreatment,
+CASE WHEN Count_NotAtCaseness < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_NotAtCaseness +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_NotAtCaseness,
+CASE WHEN Count_Recovery <5 then NULL ELSE ROUND(Percentage_Recovery, 0) END AS 'Percentage_Recovery',
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment6WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment18WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment6WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment18WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver28days] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver28days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver28days,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver90days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver90days,
+CASE WHEN [Count_SecondTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_SecondTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_SecondTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days] <5 then NULL ELSE ROUND(Percentage_FirstToSecondTreatmentOver90days, 0) END AS Percentage_FirstToSecondTreatmentOver90days
+
+FROM #CCG
+
+UNION
+
+SELECT
+
+eomonth([Month]),
+GroupType,
+[Organisation Code],
+CASE WHEN [Count_FirstTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment]+2) /5,0)*5 AS INT) AS VARCHAR), NULL) END AS 'Count_FirstTreatment',
+CASE WHEN Count_Recovery < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_Recovery +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_Recovery,
+CASE WHEN Count_FinishedCourseTreatment < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_FinishedCourseTreatment +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FinishedCourseTreatment,
+CASE WHEN Count_NotAtCaseness < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND((Count_NotAtCaseness +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_NotAtCaseness,
+CASE WHEN Count_Recovery <5 then NULL ELSE ROUND(Percentage_Recovery, 0) END AS 'Percentage_Recovery',
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment6WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstTreatment18WeeksFinishedCourseTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment6WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment6WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment6WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstTreatment18WeeksFinishedCourseTreatment] <5 then NULL ELSE ROUND(Percentage_FirstTreatment18WeeksFinishedCourseTreatment, 0) END AS Percentage_FirstTreatment18WeeksFinishedCourseTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver28days] < 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver28days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver28days,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_FirstToSecondTreatmentOver90days] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_FirstToSecondTreatmentOver90days,
+CASE WHEN [Count_SecondTreatment]< 5 THEN NULL ELSE ISNULL(CAST(CAST(ROUND(([Count_SecondTreatment] +2) / 5, 0) * 5 AS INT) AS VARCHAR), NULL) END AS Count_SecondTreatment,
+CASE WHEN [Count_FirstToSecondTreatmentOver90days] <5 then NULL ELSE ROUND(Percentage_FirstToSecondTreatmentOver90days, 0) END AS Percentage_FirstToSecondTreatmentOver90days
+
+FROM #Provider
+--------------------------------------------------------
+

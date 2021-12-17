@@ -1,0 +1,273 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+IAPT EQUALITY METRICS
+Code pulls most recent 12 months of data
+
+Last updated: 17/12/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DECLARE @RPEND Date
+DECLARE @RPSTART Date
+DECLARE @Month DATETIME
+
+--Finds most recent performance data and sets as end date
+SET @RPEND = (select MAX(Effective_Snapshot_Date) FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1])
+
+--Sets Start date as 12 months prior to end date
+SET @RPSTART = EOMONTH(Dateadd(mm,-12,@RPEND))
+
+/*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+IAPT ACCESS 65+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+--CCG level
+SELECT
+     [Group_Type]
+	  ,[CCG21] AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,sum([Measure_Value]) as 'Measure_Value'
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] ON Commissioner_Code collate SQL_Latin1_General_CP1_CI_AS = IC_CCG collate SQL_Latin1_General_CP1_CI_AS
+
+  WHERE Measure_Name = 'Count_FirstTreatment' AND [Variable_A] = '65 and over' 
+  AND [Group_Type] = 'CCG' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+    group by
+       [Group_Type]
+	  ,[Ccg21]
+      ,[Variable_Type]
+      ,[Variable_A]
+      ,[Measure_Name]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+
+  UNION 
+
+--STP Level
+  SELECT [Group_Type]
+      ,[STP_Code] collate SQL_Latin1_General_CP1_CI_AS AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Count_FirstTreatment' AND [Variable_A] = '65 and over' 
+  AND [Group_Type] = 'STP' AND Effective_Snapshot_Date between @RPSTART and @RPEND 
+
+    UNION 
+
+-- England level
+  SELECT [Group_Type]
+      ,'Eng' AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Count_FirstTreatment' AND [Variable_A] = '65 and over' 
+  AND [Group_Type] = 'England' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+UNION
+
+--Region level
+	SELECT
+	'Region' as 'Group_Type',
+	b.Region_Code as Org_Code,
+    [Variable_Type],
+	Variable_A,
+	[Measure_Name],
+	SUM(distinct([Measure_Value])),
+	[Effective_Snapshot_Date],
+	[Report_Period_Length]
+	FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1] a
+  left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies b ON a.STP_Code collate SQL_Latin1_General_CP1_CI_AS = b.STP_Code collate SQL_Latin1_General_CP1_CI_AS
+
+  WHERE  Measure_Name = 'Count_FirstTreatment' AND [Variable_A] = '65 and over' 
+  AND [Group_Type] = 'STP' AND Effective_Snapshot_Date  between @RPSTART and @RPEND
+
+group by
+b.Region_Code,
+[Variable_Type],
+[Variable_A],
+[Measure_Name],
+[Effective_Snapshot_Date],
+[Report_Period_Length]
+
+
+/*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+IAPT RECOVERY BAME
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+--CCG
+SELECT     
+	   [Group_Type]
+	  ,[CCG21] AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,'Percentage_Recovery' as 'Measure_Name'
+      ,round((sum(case when [Measure_Name] = 'Count_Recovery' then [Measure_Value] end))/(sum(case when [Measure_Name] = 'Count_FinishedCourseTreatment' then [Measure_Value] end)-sum(case when [Measure_Name] = 'Count_NotAtCaseness' then case when [Measure_Value] IS null then 0 else [Measure_Value] end end))*100,0) as 'Recovery Rate'
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] ON Commissioner_Code collate SQL_Latin1_General_CP1_CI_AS = IC_CCG collate SQL_Latin1_General_CP1_CI_AS
+WHERE Measure_Name in ('Count_Recovery', 'Count_NotAtCaseness', 'Count_FinishedCourseTreatment') AND [Variable_A] = 'BME' 
+   AND [Group_Type] = 'CCG' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+   
+   group by
+   [Group_Type],
+   [CCG21],
+   [Variable_Type],
+   [Variable_A],
+   [Effective_Snapshot_Date],
+   [Report_Period_Length]
+
+  UNION 
+
+  --STP
+  SELECT [Group_Type]
+      ,[STP_Code] collate SQL_Latin1_General_CP1_CI_AS AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Percentage_Recovery' AND [Variable_A] = 'BME' 
+   AND [Group_Type] = 'STP' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+    UNION 
+
+	--ENGLAND
+  SELECT [Group_Type]
+      ,'Eng' AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Percentage_Recovery' AND [Variable_A] = 'BME' 
+  AND [Group_Type] = 'England' AND Effective_Snapshot_Date between @RPSTART and @RPEND 
+  
+  UNION
+
+--REGION
+SELECT
+	'Region' as 'Group_Type',
+	b.Region_Code as Org_Code,
+    [Variable_Type],
+	Variable_A,
+	'Percentage_Recovery' as 'Measure_Name',
+	round((sum(distinct(case when [Measure_Name] = 'Count_Recovery' then [Measure_Value] end)))/(sum(distinct(case when [Measure_Name] = 'Count_FinishedCourseTreatment' then [Measure_Value] end))-sum(distinct(case when [Measure_Name] = 'Count_NotAtCaseness' then [Measure_Value] end)))*100,0) as 'Recovery Rate',
+	[Effective_Snapshot_Date],
+	[Report_Period_Length]
+	FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1] a
+  left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies b ON a.STP_Code collate SQL_Latin1_General_CP1_CI_AS = b.STP_Code collate SQL_Latin1_General_CP1_CI_AS
+
+  WHERE  Measure_Name in ('Count_Recovery', 'Count_NotAtCaseness', 'Count_FinishedCourseTreatment') AND [Variable_A] = 'BME' 
+  AND [Group_Type] = 'STP' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+group by
+b.Region_Code,
+[Variable_Type],
+[Variable_A],
+[Effective_Snapshot_Date],
+[Report_Period_Length]
+
+
+/*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+IAPT RECOVERY WHITE BRITISH
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--CCG
+SELECT     
+	   [Group_Type]
+	  ,[CCG21] AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,'Percentage_Recovery' as 'Measure_Name'
+      ,round((sum(case when [Measure_Name] = 'Count_Recovery' then [Measure_Value] end))/(sum(case when [Measure_Name] = 'Count_FinishedCourseTreatment' then [Measure_Value] end)-sum(case when [Measure_Name] = 'Count_NotAtCaseness' then case when [Measure_Value] IS null then 0 else [Measure_Value] end end))*100,0) as 'Recovery Rate'
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[CCG_2020_Lookup] ON Commissioner_Code collate SQL_Latin1_General_CP1_CI_AS = IC_CCG collate SQL_Latin1_General_CP1_CI_AS
+WHERE Measure_Name in ('Count_Recovery', 'Count_NotAtCaseness', 'Count_FinishedCourseTreatment') AND [Variable_A] = 'White British' 
+   AND [Group_Type] = 'CCG' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+   
+   group by
+   [Group_Type],
+   [CCG21],
+   [Variable_Type],
+   [Variable_A],
+   [Effective_Snapshot_Date],
+   [Report_Period_Length]
+
+
+   --STP
+  UNION 
+
+  SELECT [Group_Type]
+      ,[STP_Code] collate SQL_Latin1_General_CP1_CI_AS AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Percentage_Recovery' AND [Variable_A] = 'White British'
+   AND [Group_Type] = 'STP' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+    UNION 
+--ENGLAND
+
+  SELECT [Group_Type]
+      ,'Eng' AS 'Group_Code'
+      ,[Variable_Type]
+      ,[Variable_A] AS Variable
+      ,[Measure_Name]
+      ,[Measure_Value]
+      ,[Effective_Snapshot_Date]
+      ,[Report_Period_Length]
+  FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1]
+  WHERE Measure_Name = 'Percentage_Recovery' AND [Variable_A] = 'White British'
+  AND [Group_Type] = 'England' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+  
+  UNION
+
+--REGION
+SELECT
+	'Region' as 'Group_Type',
+	b.Region_Code as Org_Code,
+    [Variable_Type],
+	Variable_A,
+	'Percentage_Recovery' as 'Measure_Name',
+	(sum(distinct(case when [Measure_Name] = 'Count_Recovery' then [Measure_Value] end)))/(sum(distinct(case when [Measure_Name] = 'Count_FinishedCourseTreatment' then [Measure_Value] end))-sum(distinct(case when [Measure_Name] = 'Count_NotAtCaseness' then [Measure_Value] end)))*100 as 'Recovery Rate',
+	[Effective_Snapshot_Date],
+	[Report_Period_Length]
+	FROM [NHSE_UKHF].[IAPT].[vw_Activity_Data_Qtr1] a
+  left join NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies b ON a.STP_Code collate SQL_Latin1_General_CP1_CI_AS = b.STP_Code collate SQL_Latin1_General_CP1_CI_AS
+
+  WHERE  Measure_Name in ('Count_Recovery', 'Count_NotAtCaseness', 'Count_FinishedCourseTreatment') AND [Variable_A] = 'White British' 
+  AND [Group_Type] = 'STP' AND Effective_Snapshot_Date between @RPSTART and @RPEND
+
+group by
+b.Region_Code,
+[Variable_Type],
+[Variable_A],
+[Effective_Snapshot_Date],
+[Report_Period_Length]

@@ -1,0 +1,33 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CYP 1+ CONTACTS IN LAST 12 MONTHS
+
+Code pulls most recent 12 months of data
+
+Last updated: 16/12/2021
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+
+DECLARE @StartRP DATE
+DECLARE @EndRP DATE
+DECLARE @Month DATE
+
+SET @EndRP = (SELECT [ReportingPeriodEndDate] FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] where Der_MostRecentFlag = 'Y')
+SET @StartRP = EOMONTH(dateadd(mm,-11,@EndRP))
+
+print @startrp
+print @endrp
+
+SELECT
+	ReportingPeriodEndDate,
+	[Organisation type],
+	[Organisation code],
+	[Organisation name],
+	CASE 
+		WHEN [Organisation type] = 'England' THEN CAST ([CYP access] AS VARCHAR) 
+		WHEN [Organisation type] <> 'England' AND [CYP access] <5 THEN NULL ELSE ISNULL(CAST(ROUND([CYP access]/5.0,0)*5 AS VARCHAR),NULL) 
+	END AS RollingAccess
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_CYPWaitsAccess
+
+WHERE Der_AccessType = 'First - rolling' AND ReportingPeriodEndDate between @StartRP and @EndRP
+
+ORDER BY 2,3,1
