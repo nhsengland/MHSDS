@@ -745,7 +745,7 @@ GROUP BY t.FYear, t.Organisation_Type, map.Region_Code
 UNION ALL
 
 
--- Region targets mapped to latest boundaries
+-- England targets mapped to latest boundaries
 SELECT 
 	t.FYear,
 	'England' AS OrganisationType,
