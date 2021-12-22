@@ -742,6 +742,20 @@ LEFT JOIN NHSE_Reference.dbo.[tbl_Ref_ODS_Commissioner_Hierarchies] map ON COALE
 GROUP BY t.FYear, t.Organisation_Type, map.Region_Code
 
 
+UNION ALL
+
+
+-- Region targets mapped to latest boundaries
+SELECT 
+	t.FYear,
+	'England' AS OrganisationType,
+	'ENG' AS Organisation_Code,
+	SUM([Target]) AS Targets
+
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalTargets_Totals] t
+	 
+GROUP BY t.FYear, t.Organisation_Type
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 DUPLICATE RECORDS ACROSS NEXT 11 MONTHS TO CALCULATE ROLIING 12 MONTH DATA - FOR CALCULATING ROLLING ACCESS PRIOR TO PUBLICATION OF NHS DIGITAL FIGURES (MARCH 2021 DATA)
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
