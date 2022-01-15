@@ -95,26 +95,21 @@ SELECT
 	h.[RecordNumber],
 	-- hospital spell
 	h.[MHS501UniqID],
-	h.[UniqHospProvSpellNum],
-	--h.[UniqHospProvSpellID] AS [UniqHospProvSpellNum], new for v5
+	h.[UniqHospProvSpellID] AS [UniqHospProvSpellNum], --new for v5
 	h.[UniqServReqID],
 	NULL AS [DecidedToAdmitDate], --new for v5
 	NULL AS [DecidedToAdmitTime], --new for v5
 	h.[StartDateHospProvSpell],
 	h.[StartTimeHospProvSpell],
-	h.[SourceAdmCodeHospProvSpell],
-	--h.[SourceAdmMHHospProvSpell] AS [SourceAdmCodeHospProvSpell], new for v5
-	h.[AdmMethCodeHospProvSpell],
-	--h.[MethAdmMHHospProvSpell] AS [AdmMethCodeHospProvSpell], new for v5
+	h.[SourceAdmMHHospProvSpell] AS [SourceAdmCodeHospProvSpell], --new for v5
+	h.[MethAdmMHHospProvSpell] AS [AdmMethCodeHospProvSpell], --new for v5
 	h.[EstimatedDischDateHospProvSpell],
 	h.[PlannedDischDateHospProvSpell],
-	h.[PlannedDischDestCode],
+	h.[PlannedDestDisch] AS [PlannedDischDestCode],
 	h.[DischDateHospProvSpell],
 	h.[DischTimeHospProvSpell],
-	h.[DischMethCodeHospProvSpell],
-	--h.[MethOfDischMHHospProvSpell] AS [DischMethCodeHospProvSpell], new for v5
-	h.[DischDestCodeHospProvSpell],
-	--h.[DestOfDischHospProvSpell] AS [DischDestCodeHospProvSpell], new for v5
+	h.[MethOfDischMHHospProvSpell] AS [DischMethCodeHospProvSpell], --new for v5
+	h.[DestOfDischHospProvSpell] AS [DischDestCodeHospProvSpell], --new for v5
 	h.[PostcodeDistrictMainVisitor],
 	h.[PostcodeDistrictDischDest],
 	-- ward stays
@@ -144,8 +139,7 @@ SELECT
 FROM [NHSE_MH_PrePublication].[Test].[MHS501HospProvSpell] h
 
 LEFT JOIN [NHSE_MH_PrePublication].[Test].[MHS502WardStay] w ON w.UniqServReqID = h.UniqServReqID 
-AND w.UniqHospProvSpellNum = h.UniqHospProvSpellNum 
---AND w.UniqHospProvSpellID = h.UniqHospProvSpellID new for v5
+AND w.UniqHospProvSpellID = h.UniqHospProvSpellID --new for v5
 AND w.RecordNumber = h.RecordNumber
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header he ON he.UniqMonthID = h.UniqMonthID
