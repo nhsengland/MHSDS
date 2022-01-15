@@ -1,4 +1,3 @@
-
 DECLARE @EndRP INT
 
 SET @EndRP = (SELECT UniqMonthID
@@ -144,23 +143,19 @@ SELECT
 	NULL AS [CodeObs],
 	NULL AS [ObsValue],
 	NULL AS [UnitMeasure],
-	i.CodeProcAndProcStatus,
-	--i.[CodeIndActProcAndProcStatus] AS [CodeProcAndProcStatus], --new for v5
+	i.[CodeIndActProcAndProcStatus] AS [CodeProcAndProcStatus], --new for v5
 	'INDIRECT' AS [Der_InterventionType],
 	i.MHS204UniqID AS [Der_InterventionUniqID],
 	i.IndirectActDate AS [Der_ContactDate],
 	i.DurationIndirectAct AS [Der_InterventionDuration],
 	CASE
-		WHEN CHARINDEX(':',i.CodeProcAndProcStatus) > 0
-		THEN LEFT(i.CodeProcAndProcStatus,CHARINDEX(':',i.CodeProcAndProcStatus)-1)
-		ELSE i.CodeProcAndProcStatus
-		--WHEN CHARINDEX(':',i.CodeIndActProcAndProcStatus) > 0 --new for v5
-		--THEN LEFT(i.CodeIndActProcAndProcStatus,CHARINDEX(':',i.CodeIndActProcAndProcStatus)-1) --new for v5
-		--ELSE i.CodeIndActProcAndProcStatus --new for v5
+		WHEN CHARINDEX(':',i.CodeIndActProcAndProcStatus) > 0 --new for v5
+		THEN LEFT(i.CodeIndActProcAndProcStatus,CHARINDEX(':',i.CodeIndActProcAndProcStatus)-1) --new for v5
+		ELSE i.CodeIndActProcAndProcStatus --new for v5
 	END AS Der_SNoMEDProcCode,
 	CASE
-		WHEN CHARINDEX('=',i.CodeProcAndProcStatus) > 0
-		THEN RIGHT(i.CodeProcAndProcStatus,CHARINDEX('=',REVERSE(i.CodeProcAndProcStatus))-1)
+		WHEN CHARINDEX('=',i.[CodeIndActProcAndProcStatus]) > 0
+		THEN RIGHT(i.[CodeIndActProcAndProcStatus],CHARINDEX('=',REVERSE(i.[CodeIndActProcAndProcStatus]))-1)
 		ELSE NULL
 	END AS Der_SNoMEDProcQual
 
@@ -168,7 +163,7 @@ FROM NHSE_MH_PrePublication.Test.MHS204IndirectActivity i
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = i.UniqMonthID 
 
-WHERE (i.CodeFind IS NOT NULL OR i.CodeProcAndProcStatus IS NOT NULL)
+WHERE (i.CodeFind IS NOT NULL OR i.[CodeIndActProcAndProcStatus] IS NOT NULL)
 
 -- LOG END
 
