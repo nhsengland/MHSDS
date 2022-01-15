@@ -1,10 +1,3 @@
-
-DECLARE @EndRP INT
-
-SET @EndRP = (SELECT UniqMonthID
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
-WHERE Der_MostRecentFlag = 'Y')
-
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP TWO - REFERRALS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
@@ -93,15 +86,15 @@ SELECT
 	m.[UniqMonthID],
 	m.[OrgIDProv],
 	m.[Der_Person_ID] AS Person_ID,
-	m.[Der_Pseudo_NHS_Number],
+	m.pseudo_nhs_number_ncdr AS [Der_Pseudo_NHS_Number],
 	m.[RecordNumber],
 	m.[MHS001UniqID],
 	m.[OrgIDCCGRes],
 	m.[OrgIDEduEstab],
 	m.[EthnicCategory],
-	NULL AS [EthnicCategory2021], --new for v5
-	m.[Gender],
-	NULL AS [GenderSameAtBirth], -- new for v5
+	m.[EthnicCategory2021], --new for v5
+	CASE WHEN m.GenderIDCode IN ('1','2','3','4','X','Z') THEN m.GenderIDCode ELSE m.[Gender] END AS Gender,
+	m.[GenderSameAtBirth], -- new for v5
 	m.[MaritalStatus],
 	m.[PersDeathDate],
 	m.[AgeDeath],
@@ -130,8 +123,8 @@ SELECT
 	r.[ClinRespPriorityType],
 	r.[PrimReasonReferralMH],
 	r.[ReasonOAT],
-	NULL AS [DecisionToTreatDate], --new for v5
-	NULL AS [DecisionToTreatTime], --new for v5
+	r.[DecisionToTreatDate], --new for v5
+	r.[DecisionToTreatTime], --new for v5
 	r.[DischPlanCreationDate],
 	r.[DischPlanCreationTime],
 	r.[DischPlanLastUpdatedDate],
