@@ -1,3 +1,10 @@
+
+DECLARE @EndRP INT
+
+SET @EndRP = (SELECT UniqMonthID
+FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
+WHERE Der_MostRecentFlag = 'Y')
+
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP TWO - REFERRALS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
