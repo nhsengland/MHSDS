@@ -107,19 +107,19 @@ SELECT
 	c.[SpecialisedMHServiceCode],
 	c.[ConsType],
 	c.[CareContSubj],
-	c.[ConsMediumUsed],
+	c.[ConsMechanismMH] AS [ConsMediumUsed],
 	c.[ActLocTypeCode],
 	c.[PlaceOfSafetyInd],
 	c.[SiteIDOfTreat],
-	NULL AS [ComPeriMHPartAssessOfferInd], -- new for v5
-	NULL AS [PlannedCareContIndicator], -- new for v5
-	NULL AS [CareContPatientTherMode], -- new for v5
+	c.[ComPeriMHPartAssessOfferInd], -- new for v5
+	c.[PlannedCareContIndicator], -- new for v5
+	c.[CareContPatientTherMode], -- new for v5
 	c.[AttendOrDNACode],
 	c.[EarliestReasonOfferDate],
 	c.[EarliestClinAppDate],
 	c.[CareContCancelDate],
 	c.[CareContCancelReas],
-	NULL AS [ReasonableAdjustmentMade], -- new for v5
+	c.[ReasonableAdjustmentMade], -- new for v5
 	c.[AgeCareContDate],
 	c.[ContLocDistanceHome],
 	c.[TimeReferAndCareContact],
@@ -227,40 +227,41 @@ SELECT
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
 
 INTO #ContOrder_Temp
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a  
 
-WHERE (a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.ConsMediumUsed NOT IN ('05','06') OR OrgIDProv = 'DFC' AND a.ConsMediumUsed IN ('05','06'))) OR a.[Der_ActivityType] = 'INDIRECT'
+WHERE a.UniqMonthID < 1459 AND ((a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.ConsMediumUsed NOT IN ('05','06') OR OrgIDProv = 'DFC' AND a.ConsMediumUsed IN ('05','06'))) OR a.[Der_ActivityType] = 'INDIRECT') OR
+	a.UniqMonthID >= 1459 AND ((a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.ConsMediumUsed IN ('01', '02', '04', '11') OR OrgIDProv = 'DFC' AND a.ConsMediumUsed IN ('05','09', '10', '13'))) OR a.[Der_ActivityType] = 'INDIRECT')
 
 ---- ATTENDED DIRECT CONTACT ORDER 
 
 SELECT 
 	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
 
 INTO #DirectOrder_Temp
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a  
 
-WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND a.ConsMediumUsed NOT IN ('05','06') 
+WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.UniqMonthID < 1459 AND a.ConsMediumUsed NOT IN ('05','06') OR a.UniqMonthID >= 1459 AND a.ConsMediumUsed IN ('01', '02', '04', '11'))
 
 --- DIRECT FACE TO FACE CONTACT ORDER 
 
 SELECT 
 	a.Der_RecordID,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
 
 INTO #F2F_Temp 
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a 
 
-WHERE (a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND a.ConsMediumUsed IN ('01', '03')) 
+WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.UniqMonthID < 1459 AND a.ConsMediumUsed IN ('01', '03') OR a.UniqMonthID >= 1459 AND a.ConsMediumUsed IN ('01', '11')) 
 
 ---- COMBINE TEMP TABLES
  
