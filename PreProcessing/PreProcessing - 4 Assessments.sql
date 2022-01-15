@@ -1,4 +1,3 @@
-
 DECLARE @EndRP INT
 
 SET @EndRP = (SELECT UniqMonthID
@@ -120,8 +119,7 @@ SELECT
 	r.[UniqMonthID],
 	r.[CodedAssToolType],
 	r.[PersScore],
-	r.AssToolCompDate  AS Der_AssToolCompDate,
-	--r.AssToolCompTimestamp AS Der_AssToolCompDate, -- new field for v5
+	r.AssToolCompTimestamp AS Der_AssToolCompDate, -- new field for v5
 	r.[RecordNumber],
 	r.[MHS606UniqID] AS Der_AssUniqID,
 	r.[OrgIDProv],
