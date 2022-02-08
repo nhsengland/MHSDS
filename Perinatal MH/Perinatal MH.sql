@@ -4,7 +4,6 @@ PERINATAL DASHBOARD
 CREATED BY LOUISE SHUTTLEWORTH 16/09/21
 
 ASSET: MHSDS DATA TABLES 
-
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 --SET VARIABLE
@@ -31,7 +30,7 @@ SET @LatestPerformanceSub =
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
 WHERE Der_MostRecentFlag = 'Y')
 
-SET @StartRP = 1428 
+SET @StartRP = 1429 
 
 SET @RPEndDate = (SELECT ReportingPeriodEndDate
        FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
@@ -40,7 +39,6 @@ SET @RPEndDate = (SELECT ReportingPeriodEndDate
 SET @RPEndDatePerformance = (SELECT ReportingPeriodEndDate
        FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
        WHERE UniqMonthID = @LatestPerformanceSub)
-
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -98,7 +96,7 @@ FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r
 INNER JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] h ON r.UniqMonthID = h.UniqMonthID
 	AND r.UniqMonthID BETWEEN @StartRP AND @EndRP 
 	AND r.Gender = '2' -- limit to Female patients only
-	AND r.ServTeamTypeRefToMH = 'C02' -- limit to referrals to Community Perinatal MH Team type
+	AND r.ServTeamTypeRefToMH = 'C02' -- limit to referrals to Community Perinatal MH Team type [CHANGE TO: AND r.ServTeamTypeRefToMH = 'F02']
 	AND (r.LADistrictAuth IS NULL OR r.LADistrictAuth LIKE ('E%'))  -- limit to those people whose commissioner is an English organisation
 
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON r.OrgIDCCGRes = cc.Org_Code
@@ -119,6 +117,7 @@ DROP TABLE #Conts
 
 SELECT
 	   r.UniqMonthID,
+	   r.Der_FY,
        r.Person_ID,
        r.RecordNumber,
        r.OrgIDProv,
@@ -155,17 +154,17 @@ SELECT
        c.OrgIDCCGRes,
        c.UniqServReqID,
        c.UniqCareContID,
-       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDCCGRes ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessCCGRN', -- flags a woman's first contact of financial year at CCG level
-       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDProv ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRN', -- flags a woman's first contact of financial year at Provider level
-       ROW_NUMBER () OVER(PARTITION BY c.Person_ID ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessEngRN', -- flags a woman's first contact of financial year at England level
-       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.STP_Code ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessSTPRN', -- flags a woman's first contact of financial year at STP level
-       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Region_Code ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRegionRN' -- flags a woman's first contact of financial year at Region level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDCCGRes, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessCCGRN', -- flags a woman's first contact of financial year at CCG level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDProv, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRN', -- flags a woman's first contact of financial year at Provider level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessEngRN', -- flags a woman's first contact of financial year at England level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.STP_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessSTPRN', -- flags a woman's first contact of financial year at STP level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Region_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRegionRN' -- flags a woman's first contact of financial year at Region level
 
 INTO #ContYTD
 
 FROM #Conts c
 
-WHERE c.UniqMonthID BETWEEN @FYStart AND @EndRP -- to identify a woman's first attended, face to face contact with Perinatla services in this Financial year 
+WHERE c.UniqMonthID BETWEEN @StartRP AND @EndRP -- to identify a woman's first attended, face to face contact with Perinatla services in this Financial year 
 
 
 
@@ -213,11 +212,11 @@ SELECT DISTINCT
 		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS Caseload_Referral_OtherPrimaryCare,
 		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareHealthVisitor,
 		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareMaternityService,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('P1','H2') THEN 1 ELSE 0 END AS Caseload_Referral_SecondaryCare,
+		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1') THEN 1 ELSE 0 END AS Caseload_Referral_SecondaryCare,
 		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS Caseload_Referral_SelfReferral,
 		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
 			THEN 1 ELSE 0 END AS Caseload_Referral_OtherReferralSource,
-		CASE WHEN r.ServDischDate IS NULL AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','N3','P1')
+		CASE WHEN r.ServDischDate IS NULL AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1')
 				OR r.SourceOfReferralMH IS NULL)
 			THEN 1 ELSE 0 END AS Caseload_Referral_MissingInvalidReferralSource,
 
@@ -231,14 +230,14 @@ SELECT DISTINCT
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
 			AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS New_Referral_PrimaryCareMaternityService,
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
-			AND r.SourceOfReferralMH IN ('P1','H2') THEN 1 ELSE 0 END AS New_Referral_SecondaryCare,
+			AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1') THEN 1 ELSE 0 END AS New_Referral_SecondaryCare,
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
 			AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS New_Referral_SelfReferral,
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
 			AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
 		THEN 1 ELSE 0 END AS New_Referral_OtherReferralSource,
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
-			AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','N3','P1')
+			AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1')
 				OR r.SourceOfReferralMH IS NULL)
 			THEN 1 ELSE 0 END AS New_Referral_MissingInvalidReferralSource,
 		
@@ -443,7 +442,6 @@ GROUP BY
 	COALESCE(p.Region_Code,'Missing / Invalid'),
 	COALESCE(p.Region_Name,'Missing / Invalid')
 
-
 	
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -556,9 +554,9 @@ DROP TABLE #Pivot_Monthly_Extract
 				[New Referrals from Other referral sources],
 				[New Referrals from Missing or Invalid sources])) U
 
-	WHERE UniqMonthID >= @FYStart 
 
- 
+
+
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -584,14 +582,14 @@ SELECT DISTINCT
 	'Provider' AS OrganisationType,
 	b.OrgIDProv AS OrganisationCode,
 	b.[Provider name] AS OrganisationName,
-	SUM(ISNULL(b.InMonthAccess,0)) OVER (PARTITION BY b.OrgIDProv ORDER BY b.UniqMonthID) AS [YTD Access],
+	SUM(ISNULL(b.InMonthAccess,0)) OVER (PARTITION BY b.OrgIDProv, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
 	b.[Provider region name] AS [Geographic benchmarking group]
 	 
 INTO #YTD
 
 FROM #BaseMaster AS b
 
-WHERE b.UniqMonthID BETWEEN @FYStart and @EndRP
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
 
 UNION ALL
@@ -606,12 +604,12 @@ SELECT DISTINCT
 	'CCG' AS OrganisationType,
 	b.OrgIDCCGRes AS OrganisationCode,
 	b.[CCG name] AS OrganisationName,	
-	SUM(ISNULL(b.InMonthAccessCCG,0)) OVER (PARTITION BY b.OrgIDCCGRes ORDER BY B.UniqMonthID) AS [YTD Access],
+	SUM(ISNULL(b.InMonthAccessCCG,0)) OVER (PARTITION BY b.OrgIDCCGRes, b.Der_FY ORDER BY B.UniqMonthID) AS [YTD Access],
 	b.[Region name] AS [Geographic benchmarking group]
 
 FROM #BaseMaster AS b
 
-WHERE b.UniqMonthID BETWEEN @FYStart and @EndRP
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
 
 UNION ALL
@@ -626,14 +624,14 @@ SELECT DISTINCT
 	'STP' AS OrganisationType,
 	b.STP_Code AS OrganisationCode,
 	b.[STP name] AS OrganisationName,
-    SUM(ISNULL(b.InMonthAccessSTP,0)) OVER (PARTITION BY b.STP_Code ORDER BY b.UniqMonthID) AS [YTD Access],
+    SUM(ISNULL(b.InMonthAccessSTP,0)) OVER (PARTITION BY b.STP_Code, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
 	b.[Region name] AS [Geographic benchmarking group]
 
 FROM #BaseMaster AS b
 
 LEFT JOIN NHSE_Reference.dbo.[tbl_Ref_ODS_Commissioner_Hierarchies] map ON b.OrgIDCCGRes = map.Organisation_Code
 
-WHERE b.UniqMonthID BETWEEN @FYStart and @EndRP
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
 
 UNION ALL
@@ -647,13 +645,13 @@ SELECT DISTINCT
 	'Region' AS OrganisationType,
 	b.Region_Code AS OrganisationCode,
 	b.[Region name] AS OrganisationName,
-	SUM(ISNULL(b.InMonthAccessReg,0)) OVER (PARTITION BY b.Region_Code ORDER BY b.UniqMonthID) AS [YTD Access],
+	SUM(ISNULL(b.InMonthAccessReg,0)) OVER (PARTITION BY b.Region_Code, b.Der_FY  ORDER BY b.UniqMonthID) AS [YTD Access],
 	'N/A' AS [Geographic benchmarking group]
 
 
 FROM #BaseMaster AS b
 
-WHERE b.UniqMonthID BETWEEN @FYStart and @EndRP
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
 
 UNION ALL
@@ -668,14 +666,14 @@ SELECT DISTINCT
 	'England' AS OrganisationType,
 	'ENG' AS OrganisationCode,
 	'ENGLAND' AS OrganisationName,
-	SUM(ISNULL(m.InMonthAccessEng,0)) OVER (ORDER BY m.UniqMonthID) AS [YTD Access],
+	SUM(ISNULL(m.InMonthAccessEng,0)) OVER (PARTITION BY m.Der_FY ORDER BY m.UniqMonthID) AS [YTD Access],
 	'N/A' AS [Geographic benchmarking group]
 
 FROM #Master m
 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] AS d ON m.UniqMonthID = d.UniqMonthID
 
-WHERE m.UniqMonthID BETWEEN @FYStart and @EndRP
+WHERE m.UniqMonthID BETWEEN @StartRP and @EndRP
 
 
 
@@ -750,7 +748,8 @@ SELECT
 	t.FYear,
 	'England' AS OrganisationType,
 	'ENG' AS Organisation_Code,
-	SUM([Target]) AS Targets
+	CASE WHEN t.Fyear = '19/20' THEN '47000'
+	WHEN t.Fyear = '20/21' THEN '57000' ELSE NULL END AS Targets
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalTargets_Totals] t
 	 
@@ -760,25 +759,25 @@ GROUP BY t.FYear, t.Organisation_Type
 DUPLICATE RECORDS ACROSS NEXT 11 MONTHS TO CALCULATE ROLIING 12 MONTH DATA - FOR CALCULATING ROLLING ACCESS PRIOR TO PUBLICATION OF NHS DIGITAL FIGURES (MARCH 2021 DATA)
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
---IF OBJECT_ID ('tempdb..#Rolling') IS NOT NULL
---DROP TABLE #Rolling
+IF OBJECT_ID ('tempdb..#Rolling') IS NOT NULL
+DROP TABLE #Rolling
 
---SELECT
---	   m.UniqMonthID + (ROW_NUMBER() OVER(PARTITION BY m.UniqServReqID, m.UniqMonthID ORDER BY m.UniqMonthID ASC) -1) AS Der_MonthID,
---	   m.UniqMonthID,
---       m.Person_ID,
---       m.UniqServReqID,
---       m.OrgIDCCGRes,
---       m.OrgIDProv,
---	   m.STP_Code,
---       m.Region_Code,
---       m.AttendedContact AS RollingAccess
+SELECT
+	   m.UniqMonthID + (ROW_NUMBER() OVER(PARTITION BY m.UniqServReqID, m.UniqMonthID ORDER BY m.UniqMonthID ASC) -1) AS Der_MonthID,
+	   m.UniqMonthID,
+       m.Person_ID,
+       m.UniqServReqID,
+       m.OrgIDCCGRes,
+       m.OrgIDProv,
+	   m.STP_Code,
+       m.Region_Code,
+       m.AttendedContact AS RollingAccess
 
---INTO #Rolling
+INTO #Rolling
 
---FROM #master m
+FROM #master m
 
---CROSS JOIN MASTER..spt_values AS n WHERE n.type = 'p' AND n.number BETWEEN m.UniqMonthID AND m.UniqMonthID + 11
+CROSS JOIN MASTER..spt_values AS n WHERE n.type = 'p' AND n.number BETWEEN m.UniqMonthID AND m.UniqMonthID + 11
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -827,9 +826,9 @@ SELECT DISTINCT
 		WHEN prov.Region_Code = 'Y62' THEN 'E40000010'
 	END AS nhser19cd_Prov,
 	CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
-	--ISNULL(m1.Access,0) AS Access, -- Calculated Access counts
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
 	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
-	NULL AS [Live births 2016],
+		NULL AS [Live births 2016],
 	NULL AS [Live births 2016 2], --duplicate for denominator in tableau
 	m.[Provider region name] AS [Geographic benchmarking group]
 
@@ -841,15 +840,15 @@ FROM #BaseMaster m
 LEFT JOIN #Pub AS p ON m.OrgIDProv = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Provider'
 
 ------Rolling 12 month access count calculation
---LEFT JOIN 
---	(SELECT 
---		Der_MonthID,
---		OrgIDCCGRes,
---		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
---		COUNT(DISTINCT m1.Person_ID) AS People	
---	FROM #Rolling AS m1
---	GROUP BY Der_MonthID, OrgIDCCGRes) m1 
---	ON m.OrgIDCCGRes = m1.OrgIDCCGRes AND m.UniqMonthID = m1.Der_MonthID 
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		OrgIDProv,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+	FROM #Rolling AS m1
+	GROUP BY Der_MonthID, OrgIDProv) m1 
+	ON m.OrgIDProv = m1.OrgIDProv AND m.UniqMonthID = m1.Der_MonthID 
 
 	
 -- In month access counts
@@ -879,7 +878,7 @@ SELECT DISTINCT
 	m.[CCG name],
 	NULL AS nhser19cd_Prov,
 	CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
-	--ISNULL(m1.Access,0) AS Access, -- Calculated Access counts
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
 	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
 	b.[Live births 2016],
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
@@ -891,16 +890,16 @@ FROM #BaseMaster m
 LEFT JOIN #Pub AS p ON m.OrgIDCCGRes = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'CCG of Residence'	
 
 ------Rolling 12 month access count calculation
---LEFT JOIN 
---	(SELECT 
---		Der_MonthID,
---		OrgIDCCGRes,
---		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
---		COUNT(DISTINCT m1.Person_ID) AS People	
---	FROM #Rolling AS m1
---	GROUP BY Der_MonthID, OrgIDCCGRes) m1 
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		OrgIDCCGRes,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+	FROM #Rolling AS m1
+	GROUP BY Der_MonthID, OrgIDCCGRes) m1 
 
---	ON m.OrgIDCCGRes = m1.OrgIDCCGRes AND m.UniqMonthID = m1.Der_MonthID 
+	ON m.OrgIDCCGRes = m1.OrgIDCCGRes AND m.UniqMonthID = m1.Der_MonthID 
 
 -- In month access counts
 LEFT JOIN
@@ -946,7 +945,7 @@ SELECT DISTINCT
 	m.[STP name],
 	NULL AS nhser19cd_Prov,
 	CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
-	--ISNULL(m1.Access,0) AS Access, -- Calculated Access counts
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
 	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
 	b.[Live births 2016],
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
@@ -958,16 +957,16 @@ FROM #BaseMaster m
 LEFT JOIN #Pub AS p ON m.STP_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'STP'
 
 ------ Rolling 12 month access count calculation
---LEFT JOIN 
---	(SELECT 
---		Der_MonthID,
---		STP_Code,
---		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
---		COUNT(DISTINCT m1.Person_ID) AS People
---	FROM #Rolling AS m1
---	GROUP BY Der_MonthID, STP_Code) m1 
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		STP_Code,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People
+	FROM #Rolling AS m1
+	GROUP BY Der_MonthID, STP_Code) m1 
 
---	ON m.STP_Code = m1.STP_Code AND m.UniqMonthID = m1.Der_MonthID 	
+	ON m.STP_Code = m1.STP_Code AND m.UniqMonthID = m1.Der_MonthID 	
 
 -- In month access counts
 LEFT JOIN
@@ -1013,7 +1012,7 @@ SELECT DISTINCT
 	m.[Region name],
 	NULL AS nhser19cd_Prov,
 	CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
-	--ISNULL(m1.Access,0) AS Access, -- Calculated Access counts
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
 	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
 	b.[Live births 2016],
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
@@ -1025,16 +1024,16 @@ FROM #BaseMaster m
 LEFT JOIN #Pub AS p ON m.Region_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Region'
 
 ------ Rolling 12 month access count calculation
---LEFT JOIN 
---	(SELECT 
---		Der_MonthID,
---		Region_Code, 
---		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
---		COUNT(DISTINCT m1.Person_ID) AS People	
---		FROM #Rolling AS m1
---	GROUP BY Der_MonthID, Region_Code) m1 
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		Region_Code, 
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+		FROM #Rolling AS m1
+	GROUP BY Der_MonthID, Region_Code) m1 
 
---	ON m.Region_Code = m1.Region_Code AND m.UniqMonthID = m1.Der_MonthID 
+	ON m.Region_Code = m1.Region_Code AND m.UniqMonthID = m1.Der_MonthID 
 
 -- In month access counts
 LEFT JOIN
@@ -1082,7 +1081,7 @@ SELECT DISTINCT
 	'ENGLAND' AS OrganisationName,
 	NULL AS nhser19cd_Prov,
 	CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
-	--ISNULL(m1.Access,0) AS Access, -- Calculated Access counts
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
 	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
 	b.[Live births 2016], 
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
@@ -1094,15 +1093,15 @@ FROM #Base m
 LEFT JOIN #Pub AS p ON m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'England'
 
 ---- Rolling 12 month access count calculation
---LEFT JOIN 
---	(SELECT 
---		Der_MonthID,
---		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
---		COUNT(DISTINCT m1.Person_ID) AS People
---	FROM #Rolling AS m1
---	GROUP BY Der_MonthID) m1 
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People
+	FROM #Rolling AS m1
+	GROUP BY Der_MonthID) m1 
 
---	ON m.UniqMonthID = m1.Der_MonthID 
+	ON m.UniqMonthID = m1.Der_MonthID 
 
 -- In month access counts
 LEFT JOIN
@@ -1198,7 +1197,7 @@ SELECT DISTINCT
 	nhser19cd_Prov,
 	MeasureName,
 	MeasureValue,
-	CASE WHEN MeasureName = 'Access' THEN [Live births 2016 2] ELSE NULL END AS [Denominator],
+	CASE WHEN MeasureName IN ('Access', 'AccessRolling') THEN [Live births 2016 2] ELSE NULL END AS [Denominator],
 	[Geographic benchmarking group]
 	
 INTO #Pivot_Access 
@@ -1208,7 +1207,8 @@ FROM #AccessTotals
 UNPIVOT 
 	(MeasureValue FOR MeasureName IN 
 		(Access,
-		InMonthAccess)) U
+		InMonthAccess,
+		AccessRolling)) U
 
 UNION ALL
 
@@ -1462,24 +1462,15 @@ UPDATE ACCESS AND MONTHLY SANDBOX TABLES WITH DATA FOR THIS FINANCIAL YEAR
 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
----- DELTETE DATA FROM CASELOAD ACTIVITY TABLE SINCE START OF FINANCIAL YEAR
+-- Add to testing tables
+
 DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Activity
-WHERE UniqMonthID >= @FYStart
-
-
----- UPDATE TABLE WITH LATEST DATA 
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Activity
-SELECT * FROM #Pivot_Monthly_Extract
-WHERE UniqMonthID >= @FYStart
+SELECT * 
+FROM #Pivot_Monthly_Extract
 
-
-
----- DELTETE DATA FROM ACCESS TABLE SINCE START OF FINANCIAL YEAR
 DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
-WHERE UniqMonthID >= @FYStart
-
----- UPDATE TABLE WITH LATEST DATA 
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
-SELECT * FROM #Pivot_Access_Extract
-WHERE UniqMonthID >= @FYStart
+SELECT * 
+FROM #Pivot_Access_Extract
 
