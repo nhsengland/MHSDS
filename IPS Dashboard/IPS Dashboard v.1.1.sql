@@ -44,7 +44,7 @@ SELECT
 	map.Region_Name,
 	CASE WHEN r.SourceOfReferralMH IN ('A1','A2','A3','A4') THEN 'Primary Health Care' 
 		WHEN r.SourceOfReferralMH IN ('B1','B2') THEN 'Self Referral' 
-		WHEN r.SourceOfReferralMH IN ('I1','I2','P1') THEN 'Secondary Health Care' 
+		WHEN r.SourceOfReferralMH IN ('I1','I2','P1','Q1','M9') THEN 'Secondary Health Care' 
 		WHEN r.SourceOfReferralMH IN ('C1', 'C2', 'C3', 'D1', 'D2', 'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'F1', 'F2', 'F3', 'G1', 'G2', 'G3', 'G4', 'H1', 'H2', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'N3') THEN 'Other' 
 		ELSE 'Missing/Invalid' END AS SourceCat, -- Create/assign source of referral group
 	CASE WHEN r.AgeServReferRecDate BETWEEN 16 AND 25 THEN '16to25' 
@@ -63,7 +63,7 @@ SELECT
 		ELSE 'Missing/Invalid' END AS EthnicityCat, -- Create/assign ethnicity group
 	CASE WHEN r.Gender = '1' THEN 'Male' 
 		WHEN r.Gender = '2' THEN 'Female' 
-		WHEN r.Gender = '9' THEN 'Indeterminate' 
+		WHEN (r.Gender = '9' AND r.UniqMonthID <= '1458') OR (r.Gender IN ('3', '4') AND r.UniqMonthID > '1458') THEN 'Other' 
 		ELSE 'Missing/Invalid' END AS GenderCat, -- Create/assign gender group
 	CASE WHEN d.IMD_Decile IN ('1', '2') THEN 'Quintile 1' 
 		WHEN d.IMD_Decile IN ('3', '4') THEN 'Quintile 2' 
@@ -116,26 +116,26 @@ r.Person_ID,
 	map.Region_Name,
 	CASE WHEN r.SourceOfReferralMH IN ('A1','A2','A3','A4') THEN 'Primary Health Care' 
 		WHEN r.SourceOfReferralMH IN ('B1','B2') THEN 'Self Referral' 
-		WHEN r.SourceOfReferralMH IN ('I1','I2','P1') THEN 'Secondary Health Care' 
+		WHEN r.SourceOfReferralMH IN ('I1','I2','P1','Q1','M9') THEN 'Secondary Health Care' 
 		WHEN r.SourceOfReferralMH IN ('C1', 'C2', 'C3', 'D1', 'D2', 'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'F1', 'F2', 'F3', 'G1', 'G2', 'G3', 'G4', 'H1', 'H2', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'N3') THEN 'Other' 
-		ELSE 'Missing/Invalid' END AS SourceCat,
+		ELSE 'Missing/Invalid' END AS SourceCat, 
 	CASE WHEN r.AgeServReferRecDate BETWEEN 16 AND 25 THEN '16to25' 
 		WHEN r.AgeServReferRecDate BETWEEN 26 AND 35 THEN '26to35' 
 		WHEN r.AgeServReferRecDate BETWEEN 36 AND 45 THEN '36to45' 
 		WHEN r.AgeServReferRecDate BETWEEN 46 AND 55 THEN '46to55' 
 		WHEN r.AgeServReferRecDate BETWEEN 56 AND 64 THEN '56to64' 
 		WHEN r.AgeServReferRecDate < 16 OR r.AgeServReferRecDate > 64 THEN 'Other' 
-		ELSE 'Missing/Invalid' END AS AgeCat,
+		ELSE 'Missing/Invalid' END AS AgeCat, 
 	CASE WHEN r.EthnicCategory = 'A' THEN 'White British' 
 		WHEN r.EthnicCategory IN ('B', 'C') THEN 'White Other' 
 		WHEN r.EthnicCategory IN ('D', 'E', 'F', 'G') THEN 'Mixed' 
 		WHEN r.EthnicCategory IN ('H', 'J', 'K', 'L') THEN 'Asian' 
 		WHEN r.EthnicCategory IN ('M', 'N', 'P') THEN 'Black' 
 		WHEN r.EthnicCategory IN ('R', 'S') THEN 'Other' 
-		ELSE 'Missing/Invalid' END AS EthnicityCat,
+		ELSE 'Missing/Invalid' END AS EthnicityCat, 
 	CASE WHEN r.Gender = '1' THEN 'Male' 
 		WHEN r.Gender = '2' THEN 'Female' 
-		WHEN r.Gender = '9' THEN 'Indeterminate' 
+		WHEN (r.Gender = '9' AND r.UniqMonthID <= '1458') OR (r.Gender IN ('3', '4') AND r.UniqMonthID > '1458') THEN 'Other' 
 		ELSE 'Missing/Invalid' END AS GenderCat, 
 	CASE WHEN d.IMD_Decile IN ('1', '2') THEN 'Quintile 1' 
 		WHEN d.IMD_Decile IN ('3', '4') THEN 'Quintile 2' 
@@ -169,10 +169,10 @@ SELECT
 	SUM(CASE WHEN a.Der_DirectContactOrder = '1' THEN 1 ELSE 0 END) AS AccessFlag, -- Identify 1st ever contact (where direct contact order = 1) as access flag
 	SUM(CASE WHEN a.Der_FYDirectContactOrder = '1' THEN 1 ELSE 0 END) AS FYAccessFlag, -- Identify 1st contact in FY year (where FY direct contact order = 1) as FY access flag
 	MAX(CASE WHEN a.Der_DirectContactOrder = '1' THEN a.Der_ContactDate ELSE NULL END) AS AccessDate, -- Obtain date for first ever contact
-	SUM(CASE WHEN a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '03', '04', '98') THEN 1 ELSE 0 END) AS TotalContacts, -- Calculate total contacts per referral per month
+	SUM(CASE WHEN (a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '03', '04', '98') AND a.UniqMonthID <= '1458') OR (a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '04', '98', '11') AND a.UniqMonthID > '1458') THEN 1 ELSE 0 END) AS TotalContacts, -- Calculate total contacts per referral per month
 	SUM(CASE WHEN a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed = '01' THEN 1 ELSE 0 END) AS TotalContactsF2F, -- Calculate total contacts per referral per month that were face to face contacts
 	SUM(CASE WHEN a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed IN ('02', '04') THEN 1 ELSE 0 END) AS TotalContactsTelephone, -- Calculate total contacts per referral per month that were via telephone or talk type
-	SUM(CASE WHEN a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed = '03' THEN 1 ELSE 0 END) AS TotalContactsVideo, -- Calculate total contacts per referral per month that were via video
+	SUM(CASE WHEN (a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed = '03' AND a.UniqMonthID <= '1458') OR (a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed = '11' AND a.UniqMonthID > '1458') THEN 1 ELSE 0 END) AS TotalContactsVideo, -- Calculate total contacts per referral per month that were via video
 	SUM(CASE WHEN a.Der_DirectContactOrder IS NOT NULL AND a.ConsMediumUsed = '98' THEN 1 ELSE 0 END) AS TotalContactsOther -- Calculate total contacts per referral per month that were 'other' medium
 INTO #Activities
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a -- Select activitites info from PreProc Activity table...
@@ -213,10 +213,10 @@ SELECT
 	MIN(a.AccessFlag) AS AccessFlag, -- As we don't have Der_DirectContactOrder, identify first contact as access flag
 	MIN(a.FYAccessFlag) AS FYAccessFlag, -- As we don't have Der_FYDirectContactOrder, identify first contact of the financial year as FY access flag
 	MIN(a.Der_ContactDate) AS AccessDate, -- For now, all contacts have their date listed - will be turned into the access date in the master where AccessFlag = 1 
-	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '03', '04', '98') THEN 1 ELSE 0 END) AS TotalContacts,
+	SUM(CASE WHEN (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '03', '04', '98') AND a.UniqMonthID <= '1458') OR (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed IN ('01', '02', '04', '98', '11')  AND a.UniqMonthID > '1458') THEN 1 ELSE 0 END) AS TotalContacts,
 	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '01' THEN 1 ELSE 0 END) AS TotalContactsF2F, -- Use presence of SNOMED code instead
 	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed IN ('02', '04') THEN 1 ELSE 0 END) AS TotalContactsTelephone,
-	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '03' THEN 1 ELSE 0 END) AS TotalContactsVideo,
+	SUM(CASE WHEN (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '03' AND a.UniqMonthID <= '1458') OR (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '11' AND a.UniqMonthID > '1457')THEN 1 ELSE 0 END) AS TotalContactsVideo,
 	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '98' THEN 1 ELSE 0 END) AS TotalContactsOther -- Calculate total contacts per referral per month that were 'other' medium
 FROM #ActivitiesTEWV a
 GROUP BY a.RecordNumber, a.UniqServReqID, a.Person_ID, a.UniqMonthID
@@ -262,7 +262,8 @@ SELECT
 	e1.RecordNumber,
 	e1.EmployStatus, -- Employment status
 	e1.WeekHoursWorked, -- Weekly hours worked
-	ROW_NUMBER()OVER(PARTITION BY e1.RecordNumber ORDER BY e1.EmployStatusRecDate ASC) AS FirstRecording, -- To highlight first status if there are more than 1 in  month, for employed at referal
+	e1.EmployStatusStartDate AS EmployStatusStartDate, -- Start date of employment field (new)
+	ROW_NUMBER()OVER(PARTITION BY e1.RecordNumber ORDER BY e1.EmployStatusRecDate ASC) AS FirstRecording, -- To highlight first status if there are more than 1 in month, for employed at referal
 	ROW_NUMBER()OVER(PARTITION BY e1.RecordNumber ORDER BY e1.EmployStatusRecDate DESC) AS LastRecording -- To highlight last status if there are more than 1 in a month, for employed at discharge
 INTO #OutcomesStep1
 FROM [NHSE_MHSDS].[dbo].[MHS004EmpStatus] e1 -- Select employment status and weekly hours worked from e1 - this is processed data
@@ -275,6 +276,7 @@ SELECT
 	e2.RecordNumber,
 	e2.EmployStatus,
 	e2.WeekHoursWorked,
+	e2.EmployStatusStartDate AS EmployStatusStartDate,
 	ROW_NUMBER()OVER(PARTITION BY e2.RecordNumber ORDER BY e2.EmployStatusRecDate ASC) AS FirstRecording,
 	ROW_NUMBER()OVER(PARTITION BY e2.RecordNumber ORDER BY e2.EmployStatusRecDate DESC) AS LastRecording
 FROM [NHSE_MH_PrePublication].[test].[MHS004EmpStatus] e2 -- Repeat above (selecting employment status and weekly hours worked) but using e2 - this is unprocessed data
@@ -288,7 +290,8 @@ SELECT
 	o.RecordNumber,
 	MAX(CASE WHEN o.FirstRecording = 1 THEN o.EmployStatus ELSE NULL END) AS EmployStatusFirst, -- Select the first employment status (used for employed at referral)
 	MAX(CASE WHEN o.LastRecording = 1 THEN o.EmployStatus ELSE NULL END) AS EmployStatusLast, -- Select the last employment status (used for employed at discharge)
-	MAX(CASE WHEN o.LastRecording = 1 THEN o.WeekHoursWorked ELSE NULL END) AS WeekHoursWorkedLast -- Select the last week hours worked (used for hours worked at discharge)
+	MAX(CASE WHEN o.LastRecording = 1 THEN o.WeekHoursWorked ELSE NULL END) AS WeekHoursWorkedLast, -- Select the last week hours worked (used for hours worked at discharge)
+	MAX(CASE WHEN o.LastRecording = 1 THEN o.EmployStatusStartDate ELSE NULL END) AS EmployStatusStartDateLast -- Select the start date of the last employment status (used only in proportion missing - for now)
 INTO #Outcomes
 FROM #OutcomesStep1 o
 GROUP BY o.RecordNumber
@@ -335,8 +338,10 @@ SELECT
 	ISNULL (o.EmployStatusFirst, 0) AS EmployStatusFirst,
 	ISNULL (o.EmployStatusLast, 0) AS EmployStatusLast,
 	ISNULL (o.WeekHoursWorkedLast, 0) AS WeekHoursWorkedLast,
+	o.EmployStatusStartDateLast,
 	o.EmployStatusLast AS EmployStatusLastWithNulls, -- Leave a version of employment status where NULLs have not been converted to 0s to allow the employment status data quality measure calculated below to use assign 'Missing/Invalid' to NULL values
-	o.WeekHoursWorkedLast AS WeekHoursWorkedLastWithNulls -- Leave a version of weekly hours worked where NULLS have not been converted for a similar data quality measure
+	o.WeekHoursWorkedLast AS WeekHoursWorkedLastWithNulls, -- Leave a version of weekly hours worked where NULLS have not been converted for a similar data quality measure
+	o.EmployStatusStartDateLast AS EmployStatusStartDateLastWithNulls -- Leave a version where NULLS have not been converted for a similar data quality measure
 INTO #Master
 FROM #Referrals r --- Select referrals (r) and join all relevant columns a, o and ap temp tables constructed above
 LEFT JOIN #Activities a ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID -- Activites per referral per month combinaton
@@ -448,7 +453,9 @@ SUM(CASE WHEN r.EmployStatusLastWithNulls IS NOT NULL AND r.EmployStatusLastWith
 COUNT(*) AS AllDemom, -- An all open or closed referrals denom for data quality pie charts (except weekly hours worked) 
 SUM(CASE WHEN (r.WeekHoursWorkedLastWithNulls IS NULL OR r.WeekHoursWorkedLastWithNulls IN ('97', '99')) AND r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS WeekHoursWorkedMissing,
 SUM(CASE WHEN r.WeekHoursWorkedLastWithNulls IS NOT NULL AND r.WeekHoursWorkedLastWithNulls NOT IN ('97', '99') AND r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS WeekHoursWorkedNotMissing,
-SUM(CASE WHEN r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS AllEmpDenom -- An all employed denom for weekly hours worked pie chart
+SUM(CASE WHEN r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS AllEmpDenom, -- An all employed denom for weekly hours worked and/or start time pie chart
+SUM(CASE WHEN r.EmployStatusStartDateLastWithNulls IS NULL AND r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS EmployStatusStartDateLastMissing,
+SUM(CASE WHEN r.EmployStatusStartDateLastWithNulls IS NOT NULL AND r.EmployStatusLast = '01' THEN 1 ELSE 0 END) AS EmployStatusStartDateLastNotMissing
 
 INTO #Agg
 FROM #Master r
@@ -528,8 +535,10 @@ SELECT
 	a.EmployStatusNotMissing,
 	a.WeekHoursWorkedMissing,
 	a.WeekHoursWorkedNotMissing,
-	a.AllDemom, -- Creates 3 denominators that are needed to calculate proportions in Tableau
-	a.AllEmpDenom,
+	a.EmployStatusStartDateLastMissing,
+	a.EmployStatusStartDateLastNotMissing,
+	a.AllDemom, -- Creates 4 denominators that are needed to calculate proportions in Tableau
+	a.AllEmpDenom, 
 	a.ClosedReferralsWhoAccessedDenom,
 	a.OpenReferrals AS OpenReferralsDenom, -- Create duplicates for 6 measures that are needed as denominators to calculate proportions in Tableau
 	a.AccessedFirstTimeEver AS AccessedFirstTimeEverDenom,
@@ -564,7 +573,7 @@ SELECT
 	MeasureName, -- MeasureName now includes all measures calculated above / included in the unpivot below - there will be a row for each measure, for each of the fields we grouped by above from the UNPIVOT [month / demography (age, gender, deprivation quintile, ethnicity) & source of referral / Team ID (mapped to provider, CCG, STP and region)]
 	MeasureValue, -- MeasureValue will change depending on the MeasureName
 	CASE WHEN MeasureName IN ('SourceCatMissing', 'SourceCatNotMissing', 'AgeCatMissing', 'AgeCatNotMissing', 'EthnicityCatMissing', 'EthnicityCatNotMissing', 'GenderCatMissing', 'GenderCatNotMissing', 'DeprivationQuintileMissing', 'DeprivationQuintileNotMissing', 'EmployStatusMissing', 'EmployStatusNotMissing') THEN a.AllDemom
-		WHEN MeasureName IN ('WeekHoursWorkedMissing', 'WeekHoursWorkedNotMissing') THEN AllEmpDenom
+		WHEN MeasureName IN ('WeekHoursWorkedMissing', 'WeekHoursWorkedNotMissing', 'EmployStatusStartDateLastMissing', 'EmployStatusStartDateLastNotMissing') THEN AllEmpDenom
 		WHEN MeasureName = 'Caseload' THEN OpenReferralsDenom
 		WHEN MeasureName IN ('SeenIn7', 'SeenIn8To30', 'SeenInOver30') THEN AccessedFirstTimeEverDenom
 		WHEN MeasureName IN ('TotalContactsF2F', 'TotalContactsTelephone', 'TotalContactsVideo', 'TotalContactsOther') THEN a.TotalContactsDenom
@@ -629,4 +638,6 @@ UNPIVOT (MeasureValue FOR MeasureName IN ( -- Creating 2 new fields: MeasureName
 	a.EmployStatusMissing,
 	a.EmployStatusNotMissing,
 	a.WeekHoursWorkedMissing,
-	a.WeekHoursWorkedNotMissing)) a
+	a.WeekHoursWorkedNotMissing,
+	a.EmployStatusStartDateLastMissing, 
+	a.EmployStatusStartDateLastNotMissing)) a
