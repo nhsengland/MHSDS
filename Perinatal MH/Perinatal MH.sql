@@ -748,8 +748,7 @@ SELECT
 	t.FYear,
 	'England' AS OrganisationType,
 	'ENG' AS Organisation_Code,
-	CASE WHEN t.Fyear = '19/20' THEN '47000'
-	WHEN t.Fyear = '20/21' THEN '57000' ELSE NULL END AS Targets
+	SUM([Target]) AS Targets
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalTargets_Totals] t
 	 
@@ -1473,4 +1472,3 @@ DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 SELECT * 
 FROM #Pivot_Access_Extract
-
