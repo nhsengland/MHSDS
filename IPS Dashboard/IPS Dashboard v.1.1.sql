@@ -382,7 +382,7 @@ SUM(CASE WHEN r.ServDischDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedReferrals,
 SUM(CASE WHEN r.ServDischDate IS NULL THEN 1 ELSE 0 END) AS OpenReferrals, 
 
 -- A referral in the caseload - an open referral not yet discharged with at least 1 direct contact (1=YES, in the caseload this month) 
-SUM(CASE WHEN r.ServDischDate IS NULL AND r.ContactOrder > 0 THEN 1 ELSE 0 END) AS Caseload,
+SUM(CASE WHEN r.ServDischDate IS NULL AND r.AccessDatePerReferal IS NOT NULL AND r.AccessDatePerReferal <= r.ReportingPeriodEnd THEN 1 ELSE 0 END) AS Caseload,
 
 -- Time in days from referral / access date to discharge date
 SUM(CASE WHEN r.ServDischDate IS NOT NULL AND DATEDIFF(DD, r.ReferralRequestReceivedDate, r.ServDischDate) > 180 THEN 1 ELSE 0 END) AS LengthOfReferralOver180, 
