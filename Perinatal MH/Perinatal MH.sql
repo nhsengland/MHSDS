@@ -799,12 +799,6 @@ FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles s
 
 WHERE MEASURE_ID = 'MHS91'
 
-
-SELECT * FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles 
-WHERE MEASURE_ID = 'MHS91'
-ORDER BY REPORTING_PERIOD_END
-
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 BRINGS THROUGH ROLLING AND CALCULATED IN MONTH ACCESS TOTALS AT PROVIDER TO ENGLAND LEVELS, AND BRINGS THROUGH ONS 2016 BIRTHS FOR USE AS DENOMINATOR IN ACCESS RATE CALCULATION
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
