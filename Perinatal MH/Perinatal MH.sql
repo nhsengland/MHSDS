@@ -788,8 +788,9 @@ DROP TABLE #Pub
 
 SELECT
 	s.REPORTING_PERIOD_END AS ReportingPeriodEnd,
-	BREAKDOWN AS OrgType,
-	CASE WHEN BREAKDOWN = 'England' THEN 'ENG' ELSE s.PRIMARY_LEVEL END AS [Organisation code],
+	CASE WHEN BREAKDOWN = 'CCG - Residence' THEN 'CCG of Residence' ELSE BREAKDOWN END AS OrgType,
+	CASE WHEN BREAKDOWN = 'England' THEN 'ENG' 
+	ELSE s.PRIMARY_LEVEL END AS [Organisation code],
 	s.MEASURE_VALUE
 
 INTO #Pub
@@ -797,6 +798,11 @@ INTO #Pub
 FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles s
 
 WHERE MEASURE_ID = 'MHS91'
+
+
+SELECT * FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles 
+WHERE MEASURE_ID = 'MHS91'
+ORDER BY REPORTING_PERIOD_END
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1472,3 +1478,4 @@ DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 SELECT * 
 FROM #Pivot_Access_Extract
+
