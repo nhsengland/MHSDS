@@ -79,7 +79,7 @@ FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r
 
 WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP
 
-AND ((r.ServTeamTypeRefToMH IN ('A02','A05','A06','A07','A08','A09','A10','A12','A13','A16','C02','C03','C09','C10') 
+AND ((r.ServTeamTypeRefToMH IN ('A02','A05','A06','A07','A08','A09','A10','A12','A13','A16','C02','C03','C10') 
 	OR r.ServTeamTypeRefToMH IS NULL) -- to include specific adult teams
 	
 	OR (r.UniqMonthID < 1459 AND r.ServTeamTypeRefToMH IN ('A03','A04')) -- older crisis teams retired in v5. Will remove when 21/22 data no longer needed
