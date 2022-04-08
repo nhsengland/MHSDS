@@ -349,11 +349,6 @@ LEFT JOIN #Outcomes o ON o.RecordNumber = r.RecordNumber -- Outcomes per person 
 LEFT JOIN #ActPerRef ap ON ap.Person_ID = r.Person_ID AND ap.UniqServReqID = r.UniqServReqID -- Activities per referral per person
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Referral] p ON p.RecordNumber = r.RecordNumber AND p.UniqServReqID = r.UniqServReqID -- Add in local team identifier for each referral
  
-
-SELECT * FROM 
-#Master m
-ORDER BY UniqMonthID, OrgIDProv
-
 ---------- Create measures ----------
 
 IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL
