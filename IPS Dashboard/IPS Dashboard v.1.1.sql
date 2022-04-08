@@ -83,22 +83,22 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies map ON COALESC
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Deprivation_By_LSOA] d ON r.LSOA2011 = d.LSOA_Code AND d.Effective_Snapshot_Date = '2019-12-31' -- Join to d to obtain IMD decile from LSOA code of residence
 WHERE r.ReferralRequestReceivedDate >= '2016-01-01' AND r.UniqMonthID BETWEEN @STARTRP AND @ENDRP AND r.ServTeamTypeRefToMH = 'D05' AND (r.LADistrictAuth lIKE 'E%' OR r.LADistrictAuth IS NULL) -- Select only referrals to IPS received from 2016, in England to IPS, in the reporting period (from April 2018)
 
------ Insert TEWV referrals (repeat above but tweaked for TEWV as ServTeamTypeRefToMH = 'D05' is not available for TEWV)
+----- Insert SNOMED referrals (repeat above but tweaked for TEWV & GMMH to instead idenfity referals to IPS services via SNOMED codes, as ServTeamTypeRefToMH = 'D05' is not available)
 
-IF OBJECT_ID ('tempdb..#TEWVIPS ') IS NOT NULL
-DROP TABLE #TEWVIPS 
+IF OBJECT_ID ('tempdb..#SNOMEDIPS ') IS NOT NULL
+DROP TABLE #SNOMEDIPS 
 
 SELECT 
 	a.RecordNumber, 
 	a.UniqServReqID
-INTO #TEWVIPS 
+INTO #SNOMEDIPS 
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions a 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity p ON a.RecordNumber = p.RecordNumber AND a.UniqCareContID = p.UniqCareContID
-WHERE a.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND a.OrgIDProv = 'RX3' -- Select all interventions/activity data for TEWV referrals with IPS SNoMED codes
+WHERE a.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND a.OrgIDProv IN ('RX3', 'RXV') -- Select all interventions/activity data for TEWV referrals with IPS SNoMED codes
 AND p.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
 GROUP BY a.RecordNumber, a.UniqServReqID
 
-INSERT INTO #Referrals -- Insert TEWV referrals below into #Referrals table created above
+INSERT INTO #Referrals -- Insert SNOMED referrals below into #Referrals table created above
 
 SELECT
 r.Person_ID, 
@@ -152,7 +152,7 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o ON r.OrgIDProv =
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies map ON COALESCE(cc.New_Code, r.OrgIDCCGRes) = map.Organisation_Code
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Deprivation_By_LSOA] d ON r.LSOA2011 = d.LSOA_Code AND d.Effective_Snapshot_Date = '2019-12-31' 
-INNER JOIN #TEWVIPS a ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID -- Select all referrals that have a contact related to IPS at TEWV (this means all referrals for TEWV are those that have accessed the service i.e. had a first contact)
+INNER JOIN #SNOMEDIPS a ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID -- Select all referrals that have a contact related to IPS at TEWV (this means all referrals for TEWV are those that have accessed the service i.e. had a first contact)
 WHERE r.ReferralRequestReceivedDate >= '2016-01-01' AND r.UniqMonthID BETWEEN @STARTRP AND @ENDRP AND (r.LADistrictAuth lIKE 'E%' OR r.LADistrictAuth IS NULL)
 
 ---------- Create activities temp table ----------
@@ -177,13 +177,13 @@ SELECT
 INTO #Activities
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a -- Select activitites info from PreProc Activity table...
 INNER JOIN #Referrals r ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID -- ... only for IPS referrals - those in the #Referrals table
-WHERE a.OrgIDProv <> 'RX3' -- Ignore TEWV data as this is selected separately below
+WHERE a.OrgIDProv <> 'RX3' AND a.OrgIDProv <> 'RXV' -- Ignore TEWV / GMMS data as this is selected separately below
 GROUP BY a.RecordNumber, a.UniqServReqID, a.Person_ID, a.UniqMonthID -- Get activites data in the format of one row per person per month, like those in #Referrals, using SUM and MAX in the Select
 
------ Insert TEWV activities (repeat above but tweaked for TEWV as ServTeamTypeRefToMH = 'D05' is not available for TEWV)
+----- Insert SNOMED activities (repeat above but tweaked for TEWV & GMMH to instead idenfity activities to IPS services via SNOMED codes, as ServTeamTypeRefToMH = 'D05' is not available)
 
-IF OBJECT_ID ('tempdb..#ActivitiesTEWV') IS NOT NULL
-DROP TABLE #ActivitiesTEWV
+IF OBJECT_ID ('tempdb..#ActivitiesSNOMED') IS NOT NULL
+DROP TABLE #ActivitiesSNOMED
 
 SELECT
 	a.RecordNumber,
@@ -196,13 +196,13 @@ SELECT
 	a.ConsMediumUsed,
 	i.Der_SNoMEDProcCode,
 	a.Der_DirectContactOrder
-INTO #ActivitiesTEWV
+INTO #ActivitiesSNOMED
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a -- Select activities info from PreProc Activity table...
 INNER JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions i ON a.RecordNumber = i.RecordNumber AND a.UniqCareContID = i.UniqCareContID AND i.Der_SNoMEDProcCode IN ('1082621000000104', '772822000')
-WHERE a.OrgIDProv = 'RX3' -- ... only for IPS activities at TEWV using SNoMED code
+WHERE a.OrgIDProv IN ('RX3', 'RXV') -- ... only for IPS activities at TEWV using SNoMED code
 AND a.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
 
-INSERT INTO #Activities -- Insert TEWV activities info below into #Activities table created above
+INSERT INTO #Activities -- Insert SNOMED activities info below into #Activities table created above
 
 SELECT
 	a.RecordNumber,
@@ -218,7 +218,7 @@ SELECT
 	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed IN ('02', '04') THEN 1 ELSE 0 END) AS TotalContactsTelephone,
 	SUM(CASE WHEN (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '03' AND a.UniqMonthID <= '1458') OR (a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '11' AND a.UniqMonthID > '1457')THEN 1 ELSE 0 END) AS TotalContactsVideo,
 	SUM(CASE WHEN a.Der_SNoMEDProcCode IS NOT NULL AND a.ConsMediumUsed = '98' THEN 1 ELSE 0 END) AS TotalContactsOther -- Calculate total contacts per referral per month that were 'other' medium
-FROM #ActivitiesTEWV a
+FROM #ActivitiesSNOMED a
 GROUP BY a.RecordNumber, a.UniqServReqID, a.Person_ID, a.UniqMonthID
 
 ---------- Create activiites per referral temp table
@@ -234,10 +234,10 @@ SELECT
 INTO #ActPerRef
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a -- Select activity info from PreProc Activity table
 INNER JOIN #Referrals r ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID -- Only select activity info for referrals in the referral table
-WHERE a.OrgIDProv <> 'RX3' -- Ignore TEWV provider as data is selected separately below
+WHERE a.OrgIDProv <> 'RX3' AND a.OrgIDProv <> 'RXV' -- Ignore TEWV provider as data is selected separately below
 GROUP BY a.UniqServReqID, a.Person_ID -- Group by ONLY referral, ignoring month
 
------ Insert TEWV activities per referral (repeat above but tweaked for TEWV  as ServTeamTypeRefToMH = 'D05' is not available for TEWV)
+----- Insert SNOMED activities per referral (repeat above but tweaked for TEWV & GMMH to instead idenfity activities to IPS services via SNOMED codes, as ServTeamTypeRefToMH = 'D05' is not available)
 
 INSERT INTO #ActPerRef
 
@@ -249,7 +249,7 @@ SELECT
 FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Interventions i
 INNER JOIN (SELECT DISTINCT r.Person_ID, r.UniqServReqID FROM [NHSE_Sandbox_MentalHealth].dbo.PreProc_Referral r GROUP BY r.Person_ID, r.UniqServReqID) r ON i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID -- Select distinct referrals at TEWV who have IPS activities
 LEFT JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity a ON a.RecordNumber = i.RecordNumber AND a.UniqCareContID = i.UniqCareContID
-WHERE i.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND i.OrgIDProv = 'RX3'
+WHERE i.Der_SNoMEDProcCode IN ('1082621000000104', '772822000') AND i.OrgIDProv IN ('RX3', 'RXV')
 AND a.Der_DirectContactOrder IS NOT NULL -- and only bring in direct contacts that are F2F, video, telephone or other
 GROUP BY i.UniqServReqID, i.Person_ID
 
@@ -349,6 +349,11 @@ LEFT JOIN #Outcomes o ON o.RecordNumber = r.RecordNumber -- Outcomes per person 
 LEFT JOIN #ActPerRef ap ON ap.Person_ID = r.Person_ID AND ap.UniqServReqID = r.UniqServReqID -- Activities per referral per person
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Referral] p ON p.RecordNumber = r.RecordNumber AND p.UniqServReqID = r.UniqServReqID -- Add in local team identifier for each referral
  
+
+SELECT * FROM 
+#Master m
+ORDER BY UniqMonthID, OrgIDProv
+
 ---------- Create measures ----------
 
 IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL
