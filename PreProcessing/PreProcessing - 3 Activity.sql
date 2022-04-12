@@ -1,3 +1,14 @@
+USE [NHSE_Sandbox_MentalHealth]
+GO
+/****** Object:  StoredProcedure [dbo].[PreProc 3 - Activity]    Script Date: 12/04/2022 10:19:15 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[PreProc 3 - Activity]
+AS
+BEGIN
 
 DECLARE @EndRP INT
 DECLARE @FYStart INT
@@ -69,6 +80,30 @@ SELECT
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ACTIVITY - DE-DUPLICATE MHS204							
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+SELECT
+	i.[UniqSubmissionID],
+	i.[NHSEUniqSubmissionID],
+	i.[UniqMonthID],
+	i.[OrgIDProv],
+	i.[Der_Person_ID],
+	i.[RecordNumber],
+	i.[UniqServReqID],
+	i.[OrgIDComm],
+	i.[CareProfTeamLocalId],
+	i.[IndirectActDate],
+	i.[IndirectActTime],
+	i.[DurationIndirectAct],
+	i.[MHS204UniqID],
+	ROW_NUMBER () OVER(PARTITION BY i.UniqServReqID, i.IndirectActDate, i.IndirectActTime ORDER BY i.IndirectActTime DESC) AS Der_ActRN
+
+INTO #Indirect
+
+FROM [NHSE_MH_PrePublication].[Test].[MHS204IndirectActivity] i
 
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ACTIVITY - INSERT DATA FROM MHS201 AND MHS204							
@@ -193,9 +228,11 @@ SELECT
 	NULL AS [Der_FacetoFaceContactOrder],
 	NULL AS [Der_FYFacetoFaceContactOrder]
 
-FROM [NHSE_MH_PrePublication].[Test].[MHS204IndirectActivity] i
+FROM #Indirect i
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = i.UniqMonthID
+
+WHERE i.Der_ActRN = 1
 
 -- LOG END
 
@@ -208,7 +245,7 @@ SELECT
 
 WAITFOR DELAY '00:00:01'
 
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ACTIVITY - BUILD DERIVATIONS					
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
 
@@ -360,3 +397,5 @@ SELECT
 	@EndRP AS [Month],
 	'Activity Create Index End' AS Step,
 	GETDATE() AS [TimeStamp]
+
+END
