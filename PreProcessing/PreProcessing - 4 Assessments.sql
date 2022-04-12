@@ -1,3 +1,16 @@
+USE [NHSE_Sandbox_MentalHealth]
+GO
+/****** Object:  StoredProcedure [dbo].[PreProc 4 - Assessments]    Script Date: 12/04/2022 10:25:03 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[PreProc 4 - Assessments]
+AS
+BEGIN
+
+
 DECLARE @EndRP INT
 
 SET @EndRP = (SELECT UniqMonthID
@@ -360,8 +373,8 @@ SELECT
 
 SELECT
 	a.Der_RecordID,
-	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.CodedAssToolType ORDER BY a.Der_AssToolCompDate ASC) AS Der_AssOrderAsc, --First assessment
-	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.CodedAssToolType ORDER BY a.Der_AssToolCompDate DESC) AS Der_AssOrderDesc -- Last assessment
+	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_PreferredTermSNOMED ORDER BY a.Der_AssToolCompDate ASC) AS Der_AssOrderAsc, --First assessment
+	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_PreferredTermSNOMED ORDER BY a.Der_AssToolCompDate DESC) AS Der_AssOrderDesc -- Last assessment
 
 INTO #AssTemp
 
@@ -441,3 +454,5 @@ SELECT
 	@EndRP AS [Month],
 	'Assessments Create Index End' AS Step,
 	GETDATE() AS [TimeStamp]
+
+END
