@@ -1,169 +1,396 @@
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-DATA QUALITY - CONSISTENCY
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DQ DASHBOARD
+ASSET: PRE-PROCESSED TABLES
+CREATED BY CARL MONEY 27/01/2021
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-Code pulls most recent 12 months of data
+DECLARE @EndRP INT
 
-Last updated: 16/12/2021
-<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+SET @EndRP = (SELECT UniqMonthID
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
+WHERE Der_MostRecentFlag = 'p')
 
-DECLARE @ENDRP DATETIME
-DECLARE @STARTRP DATETIME
+DECLARE @StartRP INT
 
---Finds most recent performance data and sets as end date
-SET @ENDRP = (select [ReportingPeriodEndDate]
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
-where Der_CurrentSubmissionWindow = 'Performance'
-group by [ReportingPeriodEndDate]) 	
+SET @StartRP = @EndRP - 24
 
---Sets Start date as 12 months prior to end date
-SET @STARTRP = (SELECT DATEADD(mm,-11,@ENDRP))
+DECLARE @ReportingPeriodEnd DATE
 
-/* Get DQ1.1 data */
+SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
+WHERE Der_MostRecentFlag = 'p')
 
-IF OBJECT_ID ('tempdb..#DQ11') IS NOT NULL
-drop table #DQ11
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF PROVIDERS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-select	
-[ReportingPeriodEndDate],	
-[Provider code],	
-[Provider name],	
-[Region code],
-[Region name],
-[STP code],
-[STP name],
-[MeasureValue],	
-[TargetValue]	
-into #DQ11
-from	
-[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality] 	
+IF OBJECT_ID ('tempdb..#MHSDSOrgs') IS NOT NULL
+DROP TABLE #MHSDSOrgs
 
-where	
-[Region code] <> 'Wales'	
-and Dashboard = 'Submission status - major charts'	
-and [Breakdown] = 'Submission consistency'			
-and [ReportingPeriodEndDate] between @STARTRP and @ENDRP
+--Get list of providerds from Master Provider List
 
-group by	
-[ReportingPeriodEndDate],	
-[Provider code],	
-[Provider name],	
-[Region code],	
-[Region name],	
-[STP code],	
-[STP name],	
-[MeasureValue],	
-[TargetValue]
+SELECT
+	m.[Org Code] AS OrgIDProvider,
+	m.[Organisation Name],
+	m.[STP code],
+	m.[Region code],
+	m.Status
 
+INTO #MHSDSOrgs
 
-/* Create Data Quality KPI 1.1 table*/
+FROM NHSE_Sandbox_MentalHealth.dbo.Staging_DQMasterProviderList m
 
-/*Add Provider level data*/
-
-select
-[ReportingPeriodEndDate],
-'Provider' as 'OrgType',
-'Data Quality Consistency' as 'Data Source',
-[Provider code] as 'Org code',
-[Provider name] as 'Org name',
-[Region code],
-[Region name],
-[STP code],
-[STP name],
-sum([MeasureValue]) as 'Measure Value',
-sum([TargetValue]) as 'Target Value',
-(sum(cast([MeasureValue] as float)) / (sum(cast([TargetValue] as float)))*100) as 'Value'
-from
-#DQ11
-
-where
-[Region code] <> 'Missing / Invalid'
-
-group by
-[ReportingPeriodEndDate],
-[Provider code],
-[Provider name],
-[Region code],
-[Region name],
-[STP code],
-[STP name]
+--Supplment this with orgs that did submit but are missing from the NHS D list
 
 UNION
 
-/* Add STP level data*/
+SELECT DISTINCT
+	r.OrgIDProvider,
+	NULL AS [Organisation Name],
+	NULL AS [STP code],
+	NULL AS [Region code],
+	'In scope' AS Status 
+	
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r WHERE r.OrgIDProvider NOT IN (SELECT m.[Org Code] FROM NHSE_Sandbox_MentalHealth.dbo.Staging_DQMasterProviderList m)
 
-select
-[ReportingPeriodEndDate],
-'STP' as 'OrgType',
-'Data Quality Consistency' as 'Data Source',
-[STP code] as 'Org code',
-[STP name] as 'Org name',
-[Region code],
-[Region name],
-[STP code],
-[STP name],
-sum([MeasureValue]),
-sum([TargetValue]),
-(sum(cast([MeasureValue] as float)) / (sum(cast([TargetValue] as float)))*100) as 'Value'
-from
-#DQ11
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE PADDED TABLE FOR EACH ORG AND MONTH
+COMBINATION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-where
-[STP code] <> 'Missing / Invalid'
+IF OBJECT_ID ('tempdb..#Base') IS NOT NULL
+DROP TABLE #Base
 
-group by
-[ReportingPeriodEndDate],
-[Region code],
-[Region name],
-[STP code],
-[STP name]
+SELECT
+	d.ReportingPeriodEndDate,
+	d.UniqMonthID,
+	CASE 
+		WHEN d.UniqMonthID = @EndRP -1 THEN 'Performance'
+		WHEN d.UniqMonthID = @EndRP THEN 'Provisional'
+		ELSE 'Historical'
+	END AS Der_CurrentSubmissionWindow,
+	o.OrgIDProvider,
+	o.[Organisation Name],
+	o.[STP code],
+	o.[Region code],
+	o.Status
 
-/* Add Region level data */
+INTO #Base
 
-UNION
+FROM #MHSDSOrgs o
 
-select
-[ReportingPeriodEndDate],
-'Region' as 'OrgType',
-'Data Quality Consistency' as 'Data Source',
-[Region code] as 'Org code',
-[Region name] as 'Org name',
-[Region code],
-[Region name],
-'NA' as 'STP code',
-'NA' as 'STP name',
-sum([MeasureValue]),
-sum([TargetValue]),
-(sum(cast([MeasureValue] as float)) / (sum(cast([TargetValue] as float)))*100) as 'Value'
-from
-#DQ11
+CROSS JOIN
 
-where
-[Region code] <> 'Missing / Invalid'
+(SELECT h.ReportingPeriodEndDate, h.UniqMonthID FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h WHERE UniqMonthID BETWEEN @StartRP AND @EndRP) d
 
-group by
-[ReportingPeriodEndDate],
-[Region code],
-[Region name]
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ORGANISATION STATUS FOR LATEST PERIOD AND 
+LINK TO REFERENCE DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-/* Add England level data */
+IF OBJECT_ID ('tempdb..#OrgStat') IS NOT NULL
+DROP TABLE #OrgStat
 
-UNION
+SELECT
+	b.ReportingPeriodEndDate,
+	b.UniqMonthID,
+	b.OrgIDProvider AS [Provider code],
+	COALESCE(p.Organisation_Name, b.[Organisation Name]) AS [Provider name],
+	COALESCE(p.STP_Code,b.[STP code], 'Missing / Invalid') AS [STP code],
+	COALESCE(s.STP_Name,'Missing / Invalid') AS [STP name],
+	COALESCE(p.Region_Code, b.[Region code], 'Missing / Invalid') AS [Region code],
+	COALESCE(re.Region_Name,'Missing / Invalid') AS [Region name],
+	b.Der_CurrentSubmissionWindow,
+	CASE 
+		WHEN b.Status = 'Not in scope' THEN 'No longer in scope'
+		WHEN f.FirstSub IS NULL THEN 'Provider not yet submitting'
+		WHEN f.FirstSub IS NOT NULL AND f.SubmissionType IS NULL AND p.Effective_To IS NULL THEN 'Missing submission'
+		WHEN p.Effective_To IS NOT NULL THEN 'Closed organisation'
+		ELSE 'Successful submission' 
+	END AS Der_OrgSubmissionStatus
 
-select
-[ReportingPeriodEndDate],
-'England' as 'OrgType',
-'Data Quality Consistency' as 'Data Source',
-'Eng' as 'Org code',
-'England' as 'Org name',
-'Eng' as 'Region code',
-'England' as 'Region name',
-'Eng' as 'STP code',
-'England' as 'STP name',
-sum([MeasureValue]),
-sum([TargetValue]),
-(sum(cast([MeasureValue] as float)) / (sum(cast([TargetValue] as float)))*100) as 'Value'
-from
-#DQ11
+INTO #OrgStat
 
-group by
-[ReportingPeriodEndDate]
+FROM #Base b
+
+LEFT JOIN
+(SELECT
+	r.OrgIDProvider,
+	MAX(CASE WHEN r.UniqMonthID = @EndRP-1 THEN SubmissionType END) AS SubmissionType,
+	MIN(r.UniqMonthID) AS FirstSub
+
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r
+
+WHERE TableName = 'MHS000Header' AND r.SubmissionType <= 2 AND r.RecordCount IS NOT NULL
+
+GROUP BY r.OrgIDProvider) f ON b.OrgIDProvider = f.OrgIDProvider
+
+LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON b.OrgIDProvider = p.Organisation_Code COLLATE DATABASE_DEFAULT 
+
+LEFT JOIN (SELECT DISTINCT STP_Code,STP_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) s ON COALESCE(p.STP_Code,b.[STP code]) = s.STP_Code COLLATE DATABASE_DEFAULT 
+
+LEFT JOIN (SELECT DISTINCT Region_Code,Region_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) re ON COALESCE(p.Region_Code, b.[Region code]) = re.Region_Code COLLATE DATABASE_DEFAULT 
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET NUMBER OF SUBMITTERS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	[Region code],
+	[Region name],
+	Der_CurrentSubmissionWindow,
+	Der_OrgSubmissionStatus,
+	'Submission status - time series' AS Dashboard,
+	'Submission type' AS Breakdown,
+	CASE 
+		WHEN r.SubmissionType = 1 THEN 'Primary'
+		WHEN r.SubmissionType = 2 THEN 'Performance'
+		WHEN r.SubmissionType > 2 THEN 'Resubmission'
+		ELSE 'Non-submitter'
+	END AS [Breakdown category],
+	'Submission' AS MeasureName,
+	COUNT(r.SubmissionType) AS MeasureValue, 
+	'Expected Submitters' AS DenominatorName,
+	SUM(CASE WHEN o.Der_OrgSubmissionStatus NOT IN ('Closed organisation', 'No longer in scope') THEN 1 ELSE 0 END) AS DenominatorValue,
+	'Coverage' AS TargetName,
+	70 AS TargetValue
+
+FROM #OrgStat o
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r ON r.UniqMonthID = o.UniqMonthID AND r.OrgIDProvider = o.[Provider code] AND r.TableName = 'MHS000Header'
+
+GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider name],o.[STP code], o.[STP name], o.[Region code], o.[Region name], Der_CurrentSubmissionWindow, Der_OrgSubmissionStatus, CASE WHEN r.SubmissionType = 1 THEN 'Primary' WHEN r.SubmissionType = 2 THEN 'Performance' WHEN r.SubmissionType > 2 THEN 'Resubmission' ELSE 'Non-submitter' END
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET SUBMISSIONS OVER LAST FIVE MONTHS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'Submission status - major charts' AS Dashboard,
+	'Submission consistency' AS Breakdown,
+	'Submission consistency' AS [Breakdown category],
+	'Submissions over last five months' AS MeasureName,
+	COUNT(r.SubmissionType) OVER (PARTITION BY r.OrgIDProvider ORDER BY r.UniqMonthID ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS MeasureValue, 
+	NULL AS DenominatorName,
+	NULL AS DenominatorValue,
+	'Expected Submissions' AS TargetName,
+	5 AS TargetValue
+
+FROM #OrgStat o
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r ON r.OrgIDProvider = o.[Provider code] AND r.UniqMonthID = o.UniqMonthID AND r.TableName = 'MHS000Header' AND r.SubmissionType = 2
+
+WHERE o.Der_OrgSubmissionStatus = 'Successful submission' AND o.UniqMonthID BETWEEN @StartRP AND @EndRP -1
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DQMI MHSDS DATA SET SCORE
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT DISTINCT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'DQMI' AS Dashboard,
+	'Data set score' AS Breakdown,
+	'Data set score' AS [Breakdown category],
+	'Data set score' AS MeasureName,
+	d.Dataset_Score AS MeasureValue, 
+	NULL AS DenominatorName,
+	NULL AS DenominatorValue,
+	'Data set score' AS TargetName,
+	70 AS TargetValue
+
+FROM #OrgStat o
+
+INNER JOIN [NHSE_UKHF].[Data_Quality_Maturity_Index].[vw_Open_Data1] d ON d.Effective_Snapshot_Date = o.ReportingPeriodEndDate AND 
+	CASE WHEN d.Data_Provider_Code = 'GAJ' THEN 'GAJ01' ELSE d.Data_Provider_Code END = o.[Provider code] COLLATE DATABASE_DEFAULT 
+
+WHERE d.Dataset = 'MHSDS' AND d.Report_Period_Length = 'Monthly' AND d.Effective_Snapshot_Date >= '2019-04-30'
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DQMI DATA ITEM SCORES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'DQMI' AS Dashboard,
+	'Data item score' AS Breakdown,
+	'Data item'  AS [Breakdown category],
+	CASE 
+		WHEN d.Recoded_Data_Item = 'CLINICAL RESPONSE PRIORITY TYPE' THEN 'CLINICAL RESPONSE PRIORITY TYPE (EATING DISORDER)'
+		ELSE d.Recorded_Data_Item
+	END AS MeasureName,
+	d.Data_Item_Score AS MeasureValue, 
+	'National data item score' AS DenominatorName,
+	d.National_Data_Item_Average AS DenominatorValue,
+	NULL AS TargetName,
+	NULL AS TargetValue
+
+FROM #OrgStat o
+
+INNER JOIN [NHSE_UKHF].[Data_Quality_Maturity_Index].[vw_Open_Data1] d ON d.Effective_Snapshot_Date = o.ReportingPeriodEndDate AND 
+	CASE WHEN d.Data_Provider_Code = 'GAJ' THEN 'GAJ01' ELSE d.Data_Provider_Code END = o.[Provider code] COLLATE DATABASE_DEFAULT 
+
+WHERE d.Dataset = 'MHSDS' AND d.Report_Period_Length = 'Monthly' AND d.Effective_Snapshot_Date >= '2019-04-30'
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET CQUIN DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'Outcomes CQUIN' AS Dashboard,
+	'Service type' AS Breakdown,
+	c.[Service Type] AS [Breakdown category],
+	c.MeasureName,
+	c.MeasureValue, 
+	'Closed referrals open more than 14 days with two or more contacts' AS DenominatorName,
+	c.Denominator AS DenominatorValue,
+	'Outcomes CQUIN' AS TargetName,
+	30 AS TargetValue
+
+FROM #OrgStat o
+
+INNER JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2021] c ON o.ReportingPeriodEndDate = c.ReportingPeriodEndDate AND o.[Provider code] = c.[Organisation Code] AND c.[Assessment Name] = 'All' AND 
+	c.MeasureName = 'Closed referrals open more than 14 days with two or more contacts and a paired score'
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET SNOMED COMPLIANCE - CARE CONTACTS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'SNoMED CT' AS Dashboard,
+	'Coverage' AS Breakdown,
+	'Care contacts' AS [Breakdown category],
+	'Contacts with SNoMED CT' AS MeasureName,
+	COUNT(DISTINCT i.UniqCareContID) AS MeasureValue,
+	'Total contacts' AS DenominatorName,
+	COUNT(DISTINCT a.UniqCareContID) AS DenominatorValue, 
+	'SNoMED CT' AS TargetName,
+	70 AS TargetName
+
+FROM #OrgStat o
+
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.UniqMonthID = o.UniqMonthID AND a.OrgIDProv = o.[Provider code] AND a.AttendOrDNACode IN ('5','6') AND a.UniqMonthID >= @StartRP
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
+
+GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider name], o.[STP code], o.[STP name], o.[Region code], o.[Region name], o.Der_CurrentSubmissionWindow, o.Der_OrgSubmissionStatus
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET SNOMED COMPLIANCE - INDIRECT ACTIVITY
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+
+SELECT
+	o.ReportingPeriodEndDate,
+	o.UniqMonthID,
+	o.[Provider code],
+	o.[Provider name],
+	o.[STP code],
+	o.[STP name],
+	o.[Region code],
+	o.[Region name],
+	o.Der_CurrentSubmissionWindow,
+	o.Der_OrgSubmissionStatus,
+	'SNoMED CT' AS Dashboard,
+	'Coverage' AS Breakdown,
+	'Indirect activity' AS [Breakdown category],
+	'Contacts with SNoMED CT' AS MeasureName,
+	COUNT(DISTINCT i.Der_InterventionUniqID) AS MeasureValue,
+	'Total contacts' AS DenominatorName,
+	COUNT(DISTINCT a.Der_ActivityUniqID) AS DenominatorValue, 
+	'SNoMED CT' AS TargetName,
+	70 AS TargetValue
+
+FROM #OrgStat o
+
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.UniqMonthID = o.UniqMonthID AND a.OrgIDProv = o.[Provider code] AND a.Der_ActivityType = 'Indirect' AND a.UniqMonthID >= @StartRP
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
+
+GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider name], o.[STP code], o.[STP name],o.[Region code], o.[Region name], o.Der_CurrentSubmissionWindow, o.Der_OrgSubmissionStatus
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+FIX ERRONEOUS NHS D MAPPING
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+UPDATE a
+
+SET a.[STP name] = p.STP_Name
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_DataQuality a
+
+LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) p ON a.[STP code] = p.STP_Code
+
+UPDATE a
+
+SET a.[Region name] = p.Region_Name
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_DataQuality a
+
+LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) p ON a.[Region code] = p.Region_Code
