@@ -1,3 +1,4 @@
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 DQ DASHBOARD
 ASSET: PRE-PROCESSED TABLES
@@ -51,7 +52,20 @@ SELECT DISTINCT
 	NULL AS [Region code],
 	'In scope' AS Status 
 	
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r WHERE r.OrgIDProvider NOT IN (SELECT m.[Org Code] FROM NHSE_Sandbox_MentalHealth.dbo.Staging_DQMasterProviderList m)
+FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r
+
+--Supplment this with orgs that did submit but are missing from the DQMI list
+
+UNION
+
+SELECT DISTINCT
+	r.Data_Provider_Code COLLATE DATABASE_DEFAULT  AS OrgIDProvider,
+	NULL AS [Organisation Name],
+	NULL AS [STP code],
+	NULL AS [Region code],
+	'Not in scope' AS Status 
+	
+FROM [NHSE_UKHF].[Data_Quality_Maturity_Index].[vw_Open_Data1] r
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CREATE PADDED TABLE FOR EACH ORG AND MONTH
@@ -135,7 +149,8 @@ LEFT JOIN (SELECT DISTINCT Region_Code,Region_Name FROM NHSE_Reference.dbo.tbl_R
 GET NUMBER OF SUBMITTERS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
+IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -162,6 +177,8 @@ SELECT
 	SUM(CASE WHEN o.Der_OrgSubmissionStatus NOT IN ('Closed organisation', 'No longer in scope') THEN 1 ELSE 0 END) AS DenominatorValue,
 	'Coverage' AS TargetName,
 	70 AS TargetValue
+
+INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_DataQuality]
 
 FROM #OrgStat o
 
@@ -293,17 +310,18 @@ SELECT
 	'Outcomes CQUIN' AS Dashboard,
 	'Service type' AS Breakdown,
 	c.[Service Type] AS [Breakdown category],
-	c.MeasureName,
-	c.MeasureValue, 
-	'Closed referrals open more than 14 days with two or more contacts' AS DenominatorName,
-	c.Denominator AS DenominatorValue,
+	'Referrals with a paired score' AS MeasureName,
+	SUM(c.MeasureValue) AS MeasureValue, 
+	'Referrals with two or more contacts' AS DenominatorName,
+	SUM(c.Denominator) AS DenominatorValue,
 	'Outcomes CQUIN' AS TargetName,
 	30 AS TargetValue
 
 FROM #OrgStat o
 
-INNER JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2021] c ON o.ReportingPeriodEndDate = c.ReportingPeriodEndDate AND o.[Provider code] = c.[Organisation Code] AND c.[Assessment Name] = 'All' AND 
-	c.MeasureName = 'Closed referrals open more than 14 days with two or more contacts and a paired score'
+INNER JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2223] c ON o.ReportingPeriodEndDate = c.ReportingPeriodEndDate AND o.[Provider code] = c.[Organisation Code] AND c.Dashboard = 'Percentages' AND [Service Type] NOT IN ('CYP','Perinatal')
+
+GROUP BY o.ReportingPeriodEndDate, o.UniqMonthID, o.[Provider code], o.[Provider name], o.[STP code], o.[STP name], o.[Region code], o.[Region name], o.Der_CurrentSubmissionWindow, o.Der_OrgSubmissionStatus, c.[Service Type]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET SNOMED COMPLIANCE - CARE CONTACTS
