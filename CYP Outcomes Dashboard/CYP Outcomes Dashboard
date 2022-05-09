@@ -51,7 +51,8 @@ SELECT
 	END as TeamTypeCat
 	,r.Der_FY
 	,r.UniqMonthID
-	,h.ReportingPeriodStartDate
+	,r.ReportingPeriodStartDate
+	,r.ReportingPeriodEndDate
 	,r.OrgIDProv AS Provider_Code 
 	,COALESCE(o1.Organisation_Name,'Missing/Invalid') AS Provider_Name
 	,o1.ODS_Organisation_Type
@@ -79,7 +80,6 @@ SELECT
 	,r.ReferClosReason
 	,DATEDIFF(DD, r.ReferralRequestReceivedDate, r.ServDischDate)+1 AS RefLength
 	,CASE WHEN (DATEDIFF(DD, r.ReferralRequestReceivedDate, r.ServDischDate)+1) >= 7 THEN 1 ELSE 0 END as AtLeast7days
-	,ROW_NUMBER()OVER(PARTITION BY r.UniqServReqID ORDER BY r.RecordNumber desc) AS RN
 
 INTO #ClosedRefs
 
@@ -90,8 +90,6 @@ LEFT JOIN
 	FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] i
 	GROUP BY i.Person_ID, i.UniqServReqID) i ON i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID -- to indentify referrals to inpatient services
 
-LEFT JOIN (SELECT DISTINCT UniqMonthID, ReportingPeriodStartDate FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header) h ON r.UniqMonthID = h.UniqMonthID
-
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON r.OrgIDProv = o1.Organisation_Code --- providers 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = o2.Organisation_Code --- CCG / STP / Region 
@@ -100,10 +98,10 @@ WHERE r.AgeServReferRecDate BETWEEN 0 AND 17 --- changed from 0-18 to match CQUI
 AND r.UniqMonthID BETWEEN @START_RP AND @END_RP 
 AND r.ReferralRequestReceivedDate >= '2016-01-01' 
 AND r.ReferRejectionDate IS NULL 
-AND r.ServDischDate IS NOT NULL --- discharged referrals only, not counting inactive referrals 
+AND (r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate) --- discharged in that month 
 AND i.Der_HospSpellCount IS NULL --- to exclude referrals with an associated hospital spell 
 AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) -- to limit to those people whose commissioner is an English organisation 
-
+AND (r.ServTeamTypeRefToMH NOT IN ('B02','E01','E02','E03','E04','A14') OR r.ServTeamTypeRefToMH IS NULL) --- exclude specialist teams *but include those where team type is null
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -129,10 +127,7 @@ FROM #ClosedRefs r
 
 INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON r.Person_ID = a.Person_ID AND a.UniqServReqID = r.UniqServReqID 
 
-WHERE r.RN = 1 
-
 GROUP BY r.Person_ID, r.UniqServReqID, r.RecordNumber, r.Provider_Code 
-
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -265,8 +260,6 @@ OR a.Der_PreferredTermSNOMED IN
 	)
 
 AND ISNUMERIC(a.PersScore) = 1 
-AND r.RN = 1 
-
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 BRING REFERRALS, CONTACTS AND OUTCOMES TOGETHER 
@@ -331,9 +324,6 @@ LEFT JOIN #Contacts c ON r.Person_ID = c.Person_ID AND r.UniqServReqID = c.UniqS
 LEFT JOIN #get_ass a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID 
 
 WHERE PersScore <> 'N' AND PersScore <> 'OK' --- remove pesky non-numeric scores 
-AND r.RN = 1 
-
-
 
 
 
@@ -480,7 +470,7 @@ SELECT *,
 
 INTO #transform
 FROM #RefAss a
-WHERE a.Der_ValidScore = 'Y' --AND a.Der_UniqAssessment = 'Y'
+WHERE a.Der_ValidScore = 'Y' 
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -494,7 +484,7 @@ SELECT *
 	,ROW_NUMBER () OVER (PARTITION BY Person_ID, UniqServReqID, AssName ORDER BY Der_AssToolCompDate ASC, Der_AssUniqID ASC) AS tn
 INTO #partitioned_ass
 FROM #transform
-WHERE Contact1 <= Der_AssToolCompDate --- could remove? 
+WHERE Contact1 <= Der_AssToolCompDate 
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -583,8 +573,6 @@ LEFT JOIN #partitioned_ass a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = 
 LEFT JOIN 
 	(SELECT x.* FROM #partitioned_ass x INNER JOIN #last_ass y ON x.Person_ID = y.Person_ID AND x.UniqServReqID = y.UniqServReqID AND x.Person_ID = y.Person_ID AND x.AssName = y.AssName AND x.tn = y.max_ass) AS b
 ON a.Person_ID = b.Person_ID AND a.UniqServReqID = b.UniqServReqID AND a.AssName = b.AssName
-
-WHERE r.RN = 1 
 
 
 
@@ -804,9 +792,6 @@ LEFT JOIN #MeaningfulChange m1 ON r.UniqServReqID = m1.UniqServReqID AND r.Perso
 LEFT JOIN #MeaningfulChange m2 ON r.UniqServReqID = m2.UniqServReqID AND r.Person_ID = m2.Person_ID AND m2.Rater = 'parent' 
 LEFT JOIN #MeaningfulChange m3 ON r.UniqServReqID = m3.UniqServReqID AND r.Person_ID = m3.Person_ID AND m3.Rater = 'clinician' 
 
-WHERE r.RN = 1 
-
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGTATE REFERRAL-BASED MEASURES : COMPLETION OF OUTCOMES FOR REFERRALS 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
@@ -909,8 +894,6 @@ INTO #AggOMC
 FROM #ClosedRefs r 
 
 INNER JOIN #MeaningfulChange m ON r.UniqServReqID = m.UniqServReqID AND r.Person_ID = m.Person_ID AND Assessment = 1 
-
-WHERE r.RN = 1 
 
 GROUP BY ReportingPeriodStartDate, Der_FY, Provider_Code, Provider_Name, Provider_Type, CCGCode, CCG_Name, STP_Code, STP_Name, Region_Code, Region_Name, STP_Code_prov, STP_Name_prov, Region_Code_prov, Region_Name_prov, Rater
 
