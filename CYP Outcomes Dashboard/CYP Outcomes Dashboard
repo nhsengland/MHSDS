@@ -114,7 +114,6 @@ DROP TABLE #Contacts
 SELECT 
 	r.Person_ID
 	,r.UniqServReqID
-	,r.RecordNumber 
 	,r.Provider_Code
 	,COUNT(*) AS TotalContacts 
 	,SUM(CASE WHEN a.AttendOrDNACode IN ('5','6') THEN 1 ELSE 0 END) as AttendedContacts 
@@ -127,7 +126,7 @@ FROM #ClosedRefs r
 
 INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON r.Person_ID = a.Person_ID AND a.UniqServReqID = r.UniqServReqID 
 
-GROUP BY r.Person_ID, r.UniqServReqID, r.RecordNumber, r.Provider_Code 
+GROUP BY r.Person_ID, r.UniqServReqID, r.Provider_Code 
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
