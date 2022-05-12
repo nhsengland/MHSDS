@@ -1,6 +1,6 @@
 USE [NHSE_Sandbox_MentalHealth]
 GO
-/****** Object:  StoredProcedure [dbo].[Reporting_CQUIN22/23]    Script Date: 18/03/2022 10:33:49 ******/
+/****** Object:  StoredProcedure [dbo].[Reporting_CQUIN22/23]    Script Date: 12/05/2022 09:25:06 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -71,7 +71,7 @@ SELECT
 		WHEN r.ServTeamTypeRefToMH = 'C02' THEN 'Perinatal'
 		ELSE 'Community'
 	END AS Der_ServiceType,
-	CASE WHEN r.ServDischDate IS NOT NULL THEN 'Closed' ELSE 'Open' END AS Der_RefCategory
+	CASE WHEN r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 'Closed' ELSE 'Open' END AS Der_RefCategory
 
 INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
 
@@ -79,14 +79,14 @@ FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r
 
 WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP
 
-AND ((r.ServTeamTypeRefToMH IN ('A02','A05','A06','A07','A08','A09','A10','A12','A13','A16','C02','C10') 
+AND ((r.ServTeamTypeRefToMH IN ('A02','A05','A06','A08','A09','A10','A12','A13','A16','C02','C10') 
 	OR r.ServTeamTypeRefToMH IS NULL) -- to include specific adult teams
 	
 	OR (r.UniqMonthID < 1459 AND r.ServTeamTypeRefToMH IN ('A03','A04')) -- older crisis teams retired in v5. Will remove when 21/22 data no longer needed
 
 	OR ((r.AgeServReferRecDate BETWEEN 0 AND 17) AND r.ServTeamTypeRefToMH NOT IN ('B02','E01','E02','E03','E04','A14'))) -- and everyone under 18 at the time of the referral not accessing LDA or EIP services
 
-AND (r.ServDischDate IS NOT NULL OR DATEDIFF(DD,r.ReferralRequestReceivedDate, r.ReportingPeriodEndDate) >182) -- to include closed referrals or those open at the end of the month with a referral length of at least six months
+AND (r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate OR DATEDIFF(DD,r.ReferralRequestReceivedDate, r.ReportingPeriodEndDate) >182) -- to include closed referrals or those open at the end of the month with a referral length of at least six months
 
 AND r.ReferRejectionDate IS NULL -- exclude rejected referrals
 
@@ -326,7 +326,6 @@ INTO #OrgDates
 
 FROM #MHSDSDates d, #MHSDSOrgs o
 
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE AT REFERRAL LEVEL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
@@ -468,6 +467,27 @@ WHERE m.UniqMonthID BETWEEN @EndRP - 12 AND @EndRP - 1 -- to looks back over las
 GROUP BY m.OrgIDProv 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE AT ASSESSMENT LEVEL
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+
+SELECT
+	m.ReportingPeriodEndDate,
+	m.UniqMonthID,
+	m.OrgIDProv,
+	m.Der_ServiceType,
+	m.Der_AssessmentToolName,
+	SUM(CASE WHEN m.Der_LastAssessmentDate IS NOT NULL THEN 1 ELSE 0 END) AS [Number of paired scores]
+
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster m
+
+GROUP BY m.ReportingPeriodEndDate, m.UniqMonthID, m.OrgIDProv, m.Der_ServiceType, m.Der_AssessmentToolName
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 UNPIVOT
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
@@ -479,7 +499,7 @@ SELECT
 	UniqMonthID,
 	[Organisation Code],
 	[Service Type],
-	CAST('Counts' AS varchar(50)) AS [Dashboard],
+	CAST('Counts' AS varchar(25)) AS [Dashboard],
 	MeasureName,
 	MeasureValue,
 	NULL AS Denominator
@@ -581,6 +601,20 @@ SELECT
 
 FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext 
 
+INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
+
+SELECT
+	ReportingPeriodEndDate,
+	UniqMonthID,
+	OrgIDProv AS [Organisation Code],
+	Der_ServiceType AS [Service Type],
+	'Assessments' AS [Dashboard],
+	Der_AssessmentToolName AS MeasureName,
+	[Number of paired scores] AS MeasureValue,
+	NULL AS Denominator
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 LINK TO REFERENCE DATA AND CREATE EXTRACT
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
@@ -595,6 +629,10 @@ SELECT
 		WHEN u.UniqMonthID = @EndRP - 1 THEN 'Performance'
 		ELSE 'Historical'
 	END AS [Reporting period description],
+	CASE 
+		WHEN u.[Organisation Code] LIKE 'R%' OR u.[Organisation Code] LIKE 'T%' THEN 'NHS'
+		ELSE 'IS'
+	END AS [Organisation type],
 	p.Region_Code,
 	p.Region_Name AS [Region name],
 	u.[Organisation Code],
@@ -614,20 +652,21 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON u.[Organisati
 WHERE u.UniqMonthID >= @endRP - 12
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-TIDY UP
+DROP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DROP TABLE "Temp_CQUINAss"
-DROP TABLE "Temp_CQUINCont"
-DROP TABLE "Temp_CQUINContext"
-DROP TABLE "Temp_CQUINDuplicate"
-DROP TABLE "Temp_CQUINFirstAss"
-DROP TABLE "Temp_CQUINLastAss"
-DROP TABLE "Temp_CQUINMaster"
-DROP TABLE "Temp_CQUINRef"
-DROP TABLE "Temp_CQUINRefAgg"
-DROP TABLE "Temp_CQUINRefFinal"
-DROP TABLE "Temp_CQUINUnpiv"
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINDuplicate
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINLastAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefAgg
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefFinal
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 LOG END
