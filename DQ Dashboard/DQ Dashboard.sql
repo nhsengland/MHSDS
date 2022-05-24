@@ -1,3 +1,14 @@
+USE [NHSE_Sandbox_MentalHealth]
+GO
+/****** Object:  StoredProcedure [dbo].[Reporting_MHSDSDQDashboard]    Script Date: 24/05/2022 10:03:36 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[Reporting_MHSDSDQDashboard]
+AS
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 DQ DASHBOARD
 ASSET: PRE-PROCESSED TABLES
@@ -27,6 +38,17 @@ FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
 WHERE UniqMonthID = @StartRP)
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'MHSDS DQ Report Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET DISTINCT LIST OF PROVIDERS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
@@ -37,6 +59,8 @@ DROP TABLE #MHSDSOrgs
 
 SELECT
 	m.[Org Code] AS OrgIDProvider,
+	m.[Organisation name] AS ProviderName,
+	m.[Region code] AS RegionCode,
 	m.Status
 
 INTO #MHSDSOrgs
@@ -375,3 +399,33 @@ SET a.UniqMonthID = h.UniqMonthID
 FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_DataQuality a
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON a.ReportingPeriodEndDate = h.ReportingPeriodEndDate
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+MAP ORGS THAT DON'T YET EXIST IN CORP REF DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+UPDATE a
+
+SET 
+a.[Provider name] = m.ProviderName,
+a.[Region code] = m.RegionCode,
+a.[Region name] = p.Region_Name
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_DataQuality a
+
+LEFT JOIN #MHSDSOrgs m ON a.[Provider code] = m.OrgIDProvider
+
+LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) p ON m.RegionCode = p.Region_Code
+
+WHERE a.[Provider name] IS NULL
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG END
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'MHSDS DQ Report Complete' AS Step,
+	GETDATE() AS [TimeStamp]
