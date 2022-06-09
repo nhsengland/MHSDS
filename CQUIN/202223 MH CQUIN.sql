@@ -1,6 +1,6 @@
 USE [NHSE_Sandbox_MentalHealth]
 GO
-/****** Object:  StoredProcedure [dbo].[Reporting_CQUIN22/23]    Script Date: 12/05/2022 09:25:06 ******/
+/****** Object:  StoredProcedure [dbo].[Reporting_CQUIN22/23]    Script Date: 09/06/2022 08:36:11 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -91,6 +91,12 @@ AND (r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEnd
 AND r.ReferRejectionDate IS NULL -- exclude rejected referrals
 
 AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) -- to limit to those people whose commissioner is an English organisation
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DELETE REFERRALS TO INPATIENT SERVICES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef WHERE CONCAT(Der_PersonID,UniqServReqID,Der_FY) IN (SELECT CONCAT(Person_ID,UniqServReqID,Der_FY) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients) 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ALL CONTACTS
@@ -655,18 +661,18 @@ WHERE u.UniqMonthID >= @endRP - 12
 DROP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINDuplicate
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINLastAss
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefAgg
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefFinal
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINDuplicate
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINLastAss
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefAgg
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefFinal
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 LOG END
