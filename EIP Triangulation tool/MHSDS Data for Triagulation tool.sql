@@ -23,8 +23,8 @@ SET @StartRP = 1428 --Mar 19
 IDENTIFY REFERRALS TO EIP SERVICES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Ref') IS NOT NULL
-DROP TABLE #Ref
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref
 
 SELECT
 	r.ReportingPeriodStartDate,
@@ -47,7 +47,7 @@ SELECT
 	RIGHT(r.UniqCareProfTeamID, LEN(r.UniqCareProfTeamID) - LEN(r.OrgIDProv)) AS CareProfTeamID, -- to remove org code from start of ID
 	r.PrimReasonReferralMH
 
-INTO #Ref
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref
 
 FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r
 
@@ -57,8 +57,8 @@ WHERE r.ServTeamTypeRefToMH = 'A14' AND (r.LADistrictAuth LIKE 'E%' OR r.LADistr
 GET VALID, UNIQUE ASSESSMENTS FOR TOOLS WE'RE INTERESTED IN
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Ass') IS NOT NULL
-DROP TABLE #Ass
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ass') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ass
 
 SELECT 
 	a.Person_ID,
@@ -76,11 +76,11 @@ SELECT
 	a.Der_AssOrderAsc,
 	a.Der_AssOrderDesc
 
-INTO #Ass 
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ass 
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Assessments] a
 
-INNER JOIN #Ref e ON e.RecordNumber = a.RecordNumber AND e.UniqServReqID = a.UniqServReqID
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref e ON e.RecordNumber = a.RecordNumber AND e.UniqServReqID = a.UniqServReqID
 
 WHERE a.Der_AssOrderAsc IS NOT NULL AND (a.Der_AssessmentToolName LIKE 'HoNOS%' OR a.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)'))
 
@@ -88,8 +88,8 @@ WHERE a.Der_AssOrderAsc IS NOT NULL AND (a.Der_AssessmentToolName LIKE 'HoNOS%' 
 --GET DISTINCT ASSESSMENTS AND ORDER
 -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AssOrder') IS NOT NULL
-DROP TABLE #AssOrder
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssOrder') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssOrder
 
 SELECT DISTINCT
 	r.Person_ID,
@@ -98,16 +98,16 @@ SELECT DISTINCT
 	r.Der_AssToolCompDate,
 	DENSE_RANK () OVER (PARTITION BY r.Person_ID, r.UniqServReqID, r.[Recoded Assessment Tool Name] ORDER BY r.Der_AssToolCompDate ASC) AS AssOrder
 
-INTO #AssOrder
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssOrder
 
-FROM #Ass r
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ass r
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE ASSESSMENTS BY REFERRAL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AssAgg') IS NOT NULL
-DROP TABLE #AssAgg
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssAgg') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssAgg
 
 SELECT
 	r.ReportingPeriodEndDate,
@@ -122,11 +122,11 @@ SELECT
 	SUM(CASE WHEN o.AssOrder = 2 AND o.[Recoded Assessment Tool Name] = 'Questionnaire about the Process of Recovery (QPR)' AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'QPRRecordedMoreThanOnce',
 	SUM(CASE WHEN o.AssOrder = 2 AND o.Der_AssToolCompDate <= r.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS 'TwoMeasuresTwice'
 
-INTO #AssAgg
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssAgg
 
-FROM #Ref r 
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r 
 
-LEFT JOIN #AssOrder o ON r.Person_ID = o.Person_ID AND r.UniqServReqID = o.UniqServReqID AND o.AssOrder <=2
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssOrder o ON r.Person_ID = o.Person_ID AND r.UniqServReqID = o.UniqServReqID AND o.AssOrder <=2
 
 GROUP BY r.ReportingPeriodEndDate, r.Person_ID, r.UniqServReqID, r.CareProfTeamID
 
@@ -135,8 +135,8 @@ GET HoNOS CHANGE PROFILE - IDENTIFY FIRST AND LAST
 SCORES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#FandL') IS NOT NULL
-DROP TABLE #FandL
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_FandL') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_FandL
 
 SELECT
 	r.Person_ID,
@@ -148,9 +148,9 @@ SELECT
 	r.Der_AssOrderAsc AS FirstScore,
 	r.Der_AssOrderDesc AS LastScore
 
-INTO #FandL
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_FandL
 
-FROM #Ass r
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ass r
 
 WHERE r.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of Recovery (QPR)','HoNOS Working Age Adults')
 
@@ -158,8 +158,8 @@ WHERE r.Der_AssessmentToolName IN ('DIALOG','Questionnaire about the Process of 
 GET ASSESSMENT CHANGE PROFILE - SCORE CHANGE BY REFERRAL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Score') IS NOT NULL
-DROP TABLE #Score
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Score') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Score
 
 SELECT
 	f.Person_ID,
@@ -224,11 +224,11 @@ SELECT
 	SUM(CASE WHEN f2.Der_AssessmentToolName = 'Questionnaire about the Process of Recovery (QPR)' THEN 1 ELSE 0 END) AS 'PairedQPR',
 	SUM(CASE WHEN f2.Der_AssessmentToolName = 'HoNOS Working Age Adults' THEN 1 ELSE 0 END) AS 'PairedHoNOS'
 
-INTO #Score
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Score
 
-FROM #FandL f
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_FandL f
 
-INNER JOIN #FandL f2 ON f.Person_ID = f2.Person_ID AND f.UniqServReqID = f2.UniqServReqID AND f2.Der_AssToolCompDate > f.Der_AssToolCompDate AND f2.LastScore = 1
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_FandL f2 ON f.Person_ID = f2.Person_ID AND f.UniqServReqID = f2.UniqServReqID AND f2.Der_AssToolCompDate > f.Der_AssToolCompDate AND f2.LastScore = 1
 
 WHERE f.FirstScore = 1
 
@@ -238,19 +238,19 @@ GROUP BY f.Person_ID, f.UniqServReqID
 GET ALL BED DAYS IN ANY PROVIDER
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-if OBJECT_ID('tempdb..#BedDays') is not null
-DROP TABLE #BedDays
+if OBJECT_ID('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_BedDays') is not null
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_BedDays
 
 SELECT 
 	e.RecordNumber,
 	SUM(DATEDIFF(dd, (CASE WHEN i.StartDateHospProvSpell < e.ReportingPeriodStartDate THEN e.ReportingPeriodStartDate WHEN i.StartDateHospProvSpell < e.ReferralRequestReceivedDate THEN e.ReferralRequestReceivedDate ELSE i.StartDateHospProvSpell END), 
 	COALESCE(e.ServDischDate,CASE WHEN i.DischDateHospProvSpell < e.ReportingPeriodEndDate THEN i.DischDateHospProvSpell ELSE e.ReportingPeriodEndDate END)) + 1) AS BedDays
 	
-INTO #BedDays
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_BedDays
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] i
 
-INNER JOIN #Ref e ON e.Person_ID = i.Person_ID AND e.UniqMonthID = i.UniqMonthID
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref e ON e.Person_ID = i.Person_ID AND e.UniqMonthID = i.UniqMonthID
 
 GROUP BY e.RecordNumber
 
@@ -258,8 +258,8 @@ GROUP BY e.RecordNumber
 GET ALL PROCEDURES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-if OBJECT_ID('tempdb..#Activity') is not null
-DROP TABLE #Activity
+if OBJECT_ID('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity') is not null
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity
 
 SELECT 
 	r.ReportingPeriodEndDate,
@@ -351,9 +351,9 @@ SELECT
 	WHEN COALESCE(c.Der_SNoMEDProcCode,c.CodeObs) IS NOT NULL THEN 'Other' 
 	END AS [Intervention type]
 
-INTO #Activity
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity
 
-FROM #Ref r
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r
 
 INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions c ON r.RecordNumber = c.RecordNumber AND COALESCE(c.Der_SNoMEDProcTerm, c.Der_SNoMEDObsTerm) IS NOT NULL
 	AND c.Der_ContactDate BETWEEN r.ReferralRequestReceivedDate AND COALESCE(r.ServDischDate,r.ReportingPeriodEndDate) AND r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL
@@ -362,8 +362,8 @@ INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions c ON r.RecordNumb
 AGGREGATE PROCEDURES BY REFERRAL
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#ProcAgg') IS NOT NULL
-DROP TABLE #ProcAgg
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_ProcAgg') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_ProcAgg
 
 SELECT
 	r.UniqMonthID,
@@ -373,11 +373,11 @@ SELECT
 	COUNT([Intervention type]) AS 'AnySNoMED',
 	SUM(CASE WHEN a.[Intervention type] = 'NICE concordant' THEN 1 ELSE 0 END) AS 'NICESNoMED'
 	
-INTO #ProcAgg
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_ProcAgg
 
-FROM #Ref r 
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r 
 
-LEFT JOIN #Activity a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND a.UniqMonthID <= r.UniqMonthID
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND a.UniqMonthID <= r.UniqMonthID
 
 GROUP BY r.RecordNumber, r.UniqServReqID, r.UniqMonthID, r.OrgIDProv
 
@@ -385,8 +385,8 @@ GROUP BY r.RecordNumber, r.UniqServReqID, r.UniqMonthID, r.OrgIDProv
 AGGREGATE ACTIVITY
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Agg') IS NOT NULL
-DROP TABLE #Agg
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg
 
 SELECT
 	r.Person_ID,
@@ -395,20 +395,21 @@ SELECT
 	r.UniqServReqID,
 		
 	--in month activity
-	COUNT(CASE WHEN a.Der_ContactOrder IS NOT NULL AND a.Der_ActivityType = 'DIRECT' THEN a.RecordNumber END) AS Der_InMonthContacts,
-	COUNT(CASE WHEN a.Der_ContactOrder IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed = '01' THEN a.RecordNumber END) AS Der_InMonthF2FContacts,
-	COUNT(CASE WHEN a.Der_ContactOrder IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed = '02' THEN a.RecordNumber END) AS Der_InMonthTeleContacts,
-	COUNT(CASE WHEN a.Der_ContactOrder IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed IN ('03','04','05','06','98') THEN a.RecordNumber END) AS Der_InMonthOtherContacts,
-	COUNT(CASE WHEN a.Der_ContactOrder IS NOT NULL AND a.Der_ActivityType = 'DIRECT'  AND (a.ConsMediumUsed NOT IN ('01','02','03','04','05','06','98') OR a.ConsMediumUsed IS NULL) THEN a.RecordNumber END) AS Der_InMonthInvContacts,
+	COUNT(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT' THEN a.RecordNumber END) AS Der_InMonthContacts,
+	COUNT(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed = '01' THEN a.RecordNumber END) AS Der_InMonthF2FContacts,
+	COUNT(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed = '02' THEN a.RecordNumber END) AS Der_InMonthTeleContacts,
+	COUNT(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT' AND a.ConsMediumUsed IN ('03','04','05','06','98') THEN a.RecordNumber END) AS Der_InMonthOtherContacts,
+	COUNT(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT'  AND (a.ConsMediumUsed NOT IN ('01','02','03','04','05','06','98') OR a.ConsMediumUsed IS NULL) THEN a.RecordNumber END) AS Der_InMonthInvContacts,
 	COUNT(CASE WHEN a.AttendOrDNACode IN ('7','3') THEN a.RecordNumber END) AS Der_InMonthDNAContacts,
 	COUNT(CASE WHEN a.AttendOrDNACode IN ('2','4') THEN a.RecordNumber END) AS Der_InMonthCancelledContacts,
 	COUNT(CASE WHEN a.Der_ActivityType = 'INDIRECT' THEN a.RecordNumber END) AS Der_InMonthIndirectContacts,
 	COUNT(CASE WHEN a.Der_ActivityType = 'DIRECT' AND a.AttendOrDNACode NOT IN ('2','3','4','5','6','7') THEN a.RecordNumber END) AS Der_InMonthInvalidContacts,
-	MAX(CASE WHEN a.Der_ContactOrder IS NOT NULL THEN a.Der_ContactDate END) AS Der_LastContact
+	MAX(CASE WHEN a.Der_Contact IS NOT NULL THEN a.Der_ContactDate END) AS Der_LastContact,
+	SUM(CASE WHEN a.Der_Contact IS NOT NULL AND a.Der_ActivityType = 'DIRECT' THEN a.Der_ContactDuration END) AS Der_ContactDuration
 
-INTO #Agg
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg
 
-FROM #Ref r
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r
 
 INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID
 
@@ -418,8 +419,8 @@ GROUP BY r.Person_ID, r.ReportingPeriodEndDate, r.RecordNumber, r.UniqServReqID
 GET CUMULATIVE ACTIVITY
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Cumulative') IS NOT NULL
-DROP TABLE #Cumulative
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Cumulative') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Cumulative
 
 SELECT
 	r.Person_ID,
@@ -431,11 +432,11 @@ SELECT
 	MAX(Der_LastContact) AS Der_LastContact,
 	SUM(a.Der_InMonthContacts) AS Der_CumulativeContacts
 
-INTO #Cumulative
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Cumulative
 
-FROM #Ref r
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r
 
-LEFT JOIN #Agg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate 
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate 
 
 GROUP BY r.Person_ID, r.ReportingPeriodEndDate, r.RecordNumber, r.UniqServReqID
 
@@ -443,8 +444,8 @@ GROUP BY r.Person_ID, r.ReportingPeriodEndDate, r.RecordNumber, r.UniqServReqID
 BUILD MASTER TABLE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-if OBJECT_ID('tempdb..#Master') is not null
-DROP TABLE #Master
+if OBJECT_ID('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master') is not null
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master
 
 SELECT
 	r.ReportingPeriodStartDate,
@@ -482,13 +483,13 @@ SELECT
 	r.CareProfTeamID AS [Local team identifier],
 
 	-- get caseload measures
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS [Open referrals],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN 1 ELSE 0 END AS [Total caseload],
+	CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS [Open referrals],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN 1 ELSE 0 END AS [Total caseload],
 
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 0 AND 13 THEN 1 ELSE 0 END AS [People on the caseload aged 13 and under],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 14 AND 17 THEN 1 ELSE 0 END AS [People on the caseload aged 14-17],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 18 AND 35 THEN 1 ELSE 0 END AS [People on the caseload aged 18-35],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate >35 THEN 1 ELSE 0 END AS [People on the caseload aged 36 and over],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 0 AND 13 THEN 1 ELSE 0 END AS [People on the caseload aged 13 and under],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 14 AND 17 THEN 1 ELSE 0 END AS [People on the caseload aged 14-17],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate BETWEEN 18 AND 35 THEN 1 ELSE 0 END AS [People on the caseload aged 18-35],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND r.AgeServReferRecDate >35 THEN 1 ELSE 0 END AS [People on the caseload aged 36 and over],
 	
 	CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS [New referrals],
 	CASE WHEN r.ServDischDate IS NOT NULL THEN 1 ELSE 0 END AS [Closed referrals],
@@ -520,10 +521,10 @@ SELECT
 	CASE WHEN r.ReferRejectionDate IS NOT NULL THEN DATEDIFF(dd,r.ReferralRequestReceivedDate,r.ReferRejectionDate) END AS [Referrals not accepted length],
 
 	-- get days since last contact measures, inc categories, limited to open referrals at month end
-	CASE WHEN r.ServDischDate IS NULL AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS [Time since last contact - less than one week],
-	CASE WHEN r.ServDischDate IS NULL AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS [Time since last contact - one to two weeks],
-	CASE WHEN r.ServDischDate IS NULL AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS [Time since last contact - two to four weeks],
-	CASE WHEN r.ServDischDate IS NULL AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) >27 THEN 1 ELSE 0 END AS [Time since last contact - four weeks or more],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 0 and 6 THEN 1 ELSE 0 END AS [Time since last contact - less than one week],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 7 and 13 THEN 1 ELSE 0 END AS [Time since last contact - one to two weeks],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) BETWEEN 14 and 27 THEN 1 ELSE 0 END AS [Time since last contact - two to four weeks],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND DATEDIFF(dd,cu.Der_LastContact,r.ReportingPeriodEndDate) >27 THEN 1 ELSE 0 END AS [Time since last contact - four weeks or more],
 	
 	-- get in month activity counts
 	ag.Der_InMonthContacts AS [Attended contacts],
@@ -535,20 +536,21 @@ SELECT
 	ag.Der_InMonthTeleContacts AS [Telephone contacts],
 	ag.Der_InMonthOtherContacts AS [Contacts via other mediums],
 	ag.Der_InMonthInvalidContacts AS [Unknown / Invalid consultation medium],
+	ag.Der_ContactDuration AS [Duration of clinical contact],
 	b.BedDays AS [Days spent as an inpatient],
 	CASE WHEN b.BedDays >0 THEN 1 ELSE 0 END AS [People who spent time as an inpatient],
 	
 	-- get outcome measures
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedMoreThanOnce = 0 THEN a.HoNOSRecordedOnce END AS [HoNOS recorded once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.HoNOSRecordedMoreThanOnce END AS [HoNOS recorded more than once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedOnce = 0 THEN 1 ELSE 0 END AS [HoNOS never recorded],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedMoreThanOnce = 0 THEN a.DIALOGRecordedOnce END AS [DIALOG recorded once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.DIALOGRecordedMoreThanOnce END AS [DIALOG recorded more than once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedOnce = 0 THEN 1 ELSE 0 END AS [DIALOG never recorded],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedMoreThanOnce = 0 THEN a.QPRRecordedOnce END AS [QPR recorded once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.QPRRecordedMoreThanOnce END AS [QPR recorded more than once],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedOnce = 0 THEN 1 ELSE 0 END AS [QPR never recorded],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.TwoMeasuresTwice >0 THEN 1 ELSE 0 END AS [People with at least 2 outcome measures recorded at least twice],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedMoreThanOnce = 0 THEN a.HoNOSRecordedOnce END AS [HoNOS recorded once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.HoNOSRecordedMoreThanOnce END AS [HoNOS recorded more than once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.HoNOSRecordedOnce = 0 THEN 1 ELSE 0 END AS [HoNOS never recorded],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedMoreThanOnce = 0 THEN a.DIALOGRecordedOnce END AS [DIALOG recorded once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.DIALOGRecordedMoreThanOnce END AS [DIALOG recorded more than once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.DIALOGRecordedOnce = 0 THEN 1 ELSE 0 END AS [DIALOG never recorded],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedMoreThanOnce = 0 THEN a.QPRRecordedOnce END AS [QPR recorded once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 THEN a.QPRRecordedMoreThanOnce END AS [QPR recorded more than once],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.QPRRecordedOnce = 0 THEN 1 ELSE 0 END AS [QPR never recorded],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND cu.Der_CumulativeContacts >=1 AND a.TwoMeasuresTwice >0 THEN 1 ELSE 0 END AS [People with at least 2 outcome measures recorded at least twice],
 	--HoNOS initial scores
 	s.BEH_Ini, s.INJ_Ini, s.SUB_Ini, s.COG_Ini, s.ILL_Ini, s.HAL_Ini, s.DEP_Ini, s.OTH_Ini, s.REL_Ini, s.ADL_Ini, s.LIV_Ini, s.OCC_Ini,
 	--DIALOG initial scores
@@ -567,20 +569,20 @@ SELECT
 	CASE WHEN s.PairedQPR >= 1 THEN 1 ELSE 0 END AS [Closed referrals with a paired QPR],
 	
 	-- get aggregate SNoMED measures
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND p.AnySNoMED > 0 THEN 1 ELSE 0 END AS [Referrals with any SNoMED codes],
-	CASE WHEN r.ServDischDate IS NULL AND r.ReferRejectionDate IS NULL AND p.NICESNoMED > 0 THEN 1 ELSE 0 END AS [Referrals with NICE concordant SNoMED codes]
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND p.AnySNoMED > 0 THEN 1 ELSE 0 END AS [Referrals with any SNoMED codes],
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL AND p.NICESNoMED > 0 THEN 1 ELSE 0 END AS [Referrals with NICE concordant SNoMED codes]
 
-INTO #Master
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master
 
-FROM #Ref r 
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Ref r 
 
-LEFT JOIN #AssAgg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND r.ReportingPeriodEndDate = a.ReportingPeriodEndDate AND r.CareProfTeamID = a.CareProfTeamID
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AssAgg a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND r.ReportingPeriodEndDate = a.ReportingPeriodEndDate AND r.CareProfTeamID = a.CareProfTeamID
 
-LEFT JOIN #ProcAgg p ON r.RecordNumber = p.RecordNumber AND r.UniqServReqID = p.UniqServReqID 
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_ProcAgg p ON r.RecordNumber = p.RecordNumber AND r.UniqServReqID = p.UniqServReqID 
 
-LEFT JOIN #BedDays b ON r.RecordNumber = b.RecordNumber
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_BedDays b ON r.RecordNumber = b.RecordNumber
 
-LEFT JOIN #Score s ON r.Person_ID = s.Person_ID AND r.UniqServReqID = s.UniqServReqID AND r.ReferralRequestReceivedDate >= '2016-01-01' AND r.ServDischDate IS NOT NULL
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Score s ON r.Person_ID = s.Person_ID AND r.UniqServReqID = s.UniqServReqID AND r.ReferralRequestReceivedDate >= '2016-01-01' AND r.ServDischDate IS NOT NULL
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_DataDic_ZZZ_ReasonForReferralToMentalHealth rr ON r.PrimReasonReferralMH = rr.Main_Code_Text COLLATE DATABASE_DEFAULT AND rr.Effective_To IS NULL AND rr.Valid_To IS NULL
 
@@ -598,9 +600,9 @@ LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c ON COALESCE(
 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[Reference_ONS_CCG_lkp] ons ON ons.CCG21CDH = COALESCE(cc.New_Code,r.OrgIDCCGRes) 
 
-LEFT JOIN #Agg ag ON ag.RecordNumber = r.RecordNumber AND ag.UniqServReqID = r.UniqServReqID
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg ag ON ag.RecordNumber = r.RecordNumber AND ag.UniqServReqID = r.UniqServReqID
 
-LEFT JOIN #Cumulative cu ON cu.RecordNumber = r.RecordNumber AND cu.UniqServReqID = r.UniqServReqID
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Cumulative cu ON cu.RecordNumber = r.RecordNumber AND cu.UniqServReqID = r.UniqServReqID
 
 WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP
 
@@ -608,8 +610,8 @@ WHERE r.UniqMonthID BETWEEN @StartRP AND @EndRP
 BUILD CORE SNoMED TABLE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
---if OBJECT_ID('tempdb..#SNoCORE') is not null
---DROP TABLE #SNoCORE
+--if OBJECT_ID('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_SNoCORE') is not null
+--DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_SNoCORE
 
 --SELECT
 --	m.ReportingPeriodEndDate,
@@ -625,18 +627,18 @@ BUILD CORE SNoMED TABLE
 --	m.[Primary reason for referral],
 --	m.[Age category]
 
---INTO #SNoCORE
+--INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_SNoCORE
 
---FROM #Master m
+--FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
---LEFT JOIN #Activity a ON m.Person_ID = a.Person_ID AND m.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate <= m.ReportingPeriodEndDate 
+--LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity a ON m.Person_ID = a.Person_ID AND m.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate <= m.ReportingPeriodEndDate 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 AGGREGATE CORE DASHBOARD
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AggMainDash') IS NOT NULL
-DROP TABLE #AggMainDash
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AggMainDash') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AggMainDash
 
 SELECT
 	m.ReportingPeriodEndDate,
@@ -702,6 +704,7 @@ SELECT
 	SUM([Telephone contacts]) AS [Telephone contacts],
 	SUM([Contacts via other mediums]) AS [Contacts via other mediums],
 	SUM([Unknown / Invalid consultation medium]) AS [Unknown / Invalid consultation medium],
+	SUM([Duration of clinical contact]) AS [Duration of clinical contact],
 	SUM([Days spent as an inpatient]) AS [Days spent as an inpatient],
 	SUM([People who spent time as an inpatient]) AS [People who spent time as an inpatient],
 
@@ -782,9 +785,9 @@ SELECT
 	SUM([Closed referrals with a paired QPR]) AS [Closed referrals with a paired QPR2],
 	SUM([Total caseload]) AS [Caseload2]
 
-INTO #AggMainDash
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AggMainDash
 
-FROM #Master m
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
 GROUP BY m.ReportingPeriodEndDate, m.[Local team identifier], m.[Provider code], m.[Provider name], m.[CCG code], m.[CCG name], m.[CCG ONS code], m.[STP code], m.[STP name], m.[STP ONS code], m.[Region code], m.[Region name], m.[Region ONS code],
 	m.[Primary reason for referral], m.[Age category]
@@ -793,8 +796,8 @@ GROUP BY m.ReportingPeriodEndDate, m.[Local team identifier], m.[Provider code],
 AGGREGATE IN MONTH SNoMED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Agg2') IS NOT NULL
-DROP TABLE #Agg2
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg2') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg2
 
 SELECT
 	m.ReportingPeriodEndDate,
@@ -816,11 +819,11 @@ SELECT
 	a.Der_SNoMEDTerm AS [SNoMED term],
 	COUNT(a.Der_SNoMEDTerm) AS [Number of interventions]
 
-INTO #Agg2
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg2
 
-FROM #Master m
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
-LEFT JOIN #Activity a ON m.Person_ID = a.Person_ID AND m.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate = m.ReportingPeriodEndDate 
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Activity a ON m.Person_ID = a.Person_ID AND m.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate = m.ReportingPeriodEndDate 
 
 GROUP BY m.ReportingPeriodEndDate, m.[Local team identifier], m.[Provider code], m.[Provider name], m.[CCG code], m.[CCG name], m.[CCG ONS code], m.[STP code], m.[STP name], m.[STP ONS code], m.[Region code], m.[Region name], m.[Region ONS code],
 	m.[Primary reason for referral], m.[Age category], a.[Intervention type], a.Der_SNoMEDTerm
@@ -858,6 +861,7 @@ SELECT
 	CASE 
 		WHEN MeasureName LIKE '%SNoMED codes' THEN [Caseload2]
 		WHEN MeasureName LIKE '%recorded%' THEN [Caseload2]
+		WHEN MeasureName = 'Duration of clinical contact' THEN [Caseload2]
 		WHEN MeasureName = 'Days spent as an inpatient' THEN [People who spent time as an inpatient]
 		WHEN MeasureName = 'BEH initial' THEN [Closed referrals with a paired HoNOS2]
 		WHEN MeasureName = 'INJ initial' THEN [Closed referrals with a paired HoNOS2]
@@ -912,7 +916,7 @@ SELECT
 		END AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AggMainDash 
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AggMainDash 
 
 UNPIVOT (MeasureValue FOR MeasureName IN 
 	([Total caseload],[Open referrals],[People on the caseload aged 13 and under],[People on the caseload aged 14-17],[People on the caseload aged 18-35],[People on the caseload aged 36 and over],
@@ -925,7 +929,8 @@ UNPIVOT (MeasureValue FOR MeasureName IN
 	
 	[Time since last contact - less than one week],[Time since last contact - one to two weeks],[Time since last contact - two to four weeks],[Time since last contact - four weeks or more],[Attended contacts],[DNA'd contacts],
 	[Cancelled contacts],[Indirect contacts],[Unknown / Invalid attendance code],[Face to face contacts],[Telephone contacts],[Contacts via other mediums],[Unknown / Invalid consultation medium],[Days spent as an inpatient],
-	
+	[Duration of clinical contact],
+
 	[HoNOS recorded once],[HoNOS recorded more than once],[HoNOS never recorded],[DIALOG recorded once],[DIALOG recorded more than once],[DIALOG never recorded],[QPR recorded once],[QPR recorded more than once],[QPR never recorded],
 	[People with at least 2 outcome measures recorded at least twice],
 
@@ -960,7 +965,7 @@ SELECT
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #Agg2
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Agg2
 
 INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 
@@ -990,7 +995,7 @@ SELECT
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #Master m
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
 GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.Ethnicity
 
@@ -1022,7 +1027,7 @@ SELECT
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #Master m
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
 GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.Gender
 
@@ -1054,7 +1059,7 @@ SELECT
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #Master m
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_Master m
 
 GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP code],	[STP name],	[STP ONS code],m.[Region code], m.[Region name], [Region ONS code], m.IMD_Decile
 
@@ -1062,8 +1067,8 @@ GROUP BY m.ReportingPeriodEndDate, [CCG code],	[CCG name],	[CCG ONS code],	[STP 
 GET PUBLISHED AWT DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AWTPrep') IS NOT NULL
-DROP TABLE #AWTPrep
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep
 
 SELECT 
 	m.Reporting_Period_End AS [ReportingPeriodEndDate],
@@ -1072,15 +1077,19 @@ SELECT
 	
 	SUM(CASE WHEN m.Measure_ID = 'eip23b' THEN m.Measure_Value END) AS [Two week clock stops],
 	SUM(CASE WHEN m.Measure_ID = 'eip23a' THEN m.Measure_Value END) AS [All clock stops],
-	SUM(CASE WHEN m.Measure_ID = 'eip23i' THEN m.Measure_Value END) AS [Percent two week clock stops],
 	SUM(CASE WHEN m.Measure_ID = 'eip23e' THEN m.Measure_Value END) AS [Referrals waiting <2 Weeks],
-	SUM(CASE WHEN m.Measure_ID = 'eip23d' THEN m.Measure_Value END) AS [All referrals still waiting]
+	SUM(CASE WHEN m.Measure_ID = 'eip23f' THEN m.Measure_Value END) AS [Referrals waiting >2 Weeks],
+	SUM(CASE WHEN m.Measure_ID = 'eip23d' THEN m.Measure_Value END) AS [All referrals still waiting],
 
-INTO #AWTPrep
+	--Duplicate for denominators
+	SUM(CASE WHEN m.Measure_ID = 'eip23a' THEN m.Measure_Value END) AS [All clock stops2],
+	SUM(CASE WHEN m.Measure_ID = 'eip23d' THEN m.Measure_Value END) AS [All referrals still waiting2]
 
-FROM [NHSE_UKHF].[Mental_Health].[vw_Monthly_MHSDS_Data1] m 
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep
 
-WHERE m.Measure_ID IN ('eip23a', 'eip23b', 'eip23d', 'eip23e', 'eip23i') AND Report_Period_Length = 'Quarterly'
+FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles m 
+
+WHERE m.Measure_ID IN ('eip23a', 'eip23b', 'eip23d', 'eip23e', 'eip23f')
 
 GROUP BY m.Reporting_Period_End, m.Breakdown, m.Primary_Level
 
@@ -1088,7 +1097,7 @@ GROUP BY m.Reporting_Period_End, m.Breakdown, m.Primary_Level
 INSERT ENGLAND AND PROVIDER DATA INTO EXTRACT TABLE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT] 
 
 SELECT
 	ReportingPeriodEndDate,
@@ -1112,13 +1121,16 @@ SELECT
 	'AWT' AS [Breakdown category],
 	MeasureName,
 	MeasureValue,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [All clock stops] END AS Denominator,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [Percent two week clock stops] END AS UpperLimit,
+	CASE 
+		WHEN MeasureName = 'Two week clock stops' THEN [All clock stops2]
+		WHEN MeasureName = 'Referrals waiting >2 Weeks' THEN [All referrals still waiting2] 
+	END AS Denominator,
+	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AWTPrep a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep a
 
-UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+UNPIVOT (MeasureValue FOR MeasureName IN ([All clock stops],[Two week clock stops],[Referrals waiting <2 Weeks],[Referrals waiting >2 Weeks],[All referrals still waiting])) c
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON p.Organisation_Code = [Organisation code] COLLATE DATABASE_DEFAULT 
 
@@ -1148,13 +1160,16 @@ SELECT
 	'AWT' AS [Breakdown category],
 	MeasureName,
 	MeasureValue,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [All clock stops] END AS Denominator,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [Percent two week clock stops] END AS UpperLimit,
+	CASE 
+		WHEN MeasureName = 'Two week clock stops' THEN [All clock stops2]
+		WHEN MeasureName = 'Referrals waiting >2 Weeks' THEN [All referrals still waiting2] 
+	END AS Denominator,
+	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AWTPrep a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep a
 
-UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+UNPIVOT (MeasureValue FOR MeasureName IN ([All clock stops],[Two week clock stops],[Referrals waiting <2 Weeks],[Referrals waiting >2 Weeks],[All referrals still waiting])) c
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON p.Organisation_Code = [Organisation code] COLLATE DATABASE_DEFAULT 
 
@@ -1164,8 +1179,8 @@ WHERE [Organisation type] = 'PROVIDER'
 MAP TO NEW CCG CODES AND STP / REGION
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AWTCCG') IS NOT NULL
-DROP TABLE #AWTCCG
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTCCG') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTCCG
 
 SELECT 
 	m.ReportingPeriodEndDate,
@@ -1176,28 +1191,31 @@ SELECT
 	COALESCE(c.Region_Code,'Missing / Invalid') AS [Region code],
 	COALESCE(c.Region_Name,'Missing / Invalid') AS [Region name],
 	CASE WHEN cc.New_Code IS NULL THEN 1 ELSE 0 END AS [No CCG change],
+
 	m.[Two week clock stops],
 	m.[All clock stops],
-	m.[Percent two week clock stops],
 	m.[Referrals waiting <2 Weeks],
-	m.[All referrals still waiting]
+	m.[Referrals waiting >2 Weeks],
+	m.[All referrals still waiting],
+	m.[All clock stops2],
+	m.[All referrals still waiting2]
 
-INTO #AWTCCG
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTCCG
 
-FROM #AWTPrep m 
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTPrep m 
 
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON m.[Organisation code] = cc.Org_Code COLLATE DATABASE_DEFAULT 
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c ON COALESCE(cc.New_Code, m.[Organisation code]) = c.Organisation_Code COLLATE DATABASE_DEFAULT 
 
-WHERE [Organisation type] LIKE 'CCG%'
+WHERE [Organisation type] = 'CCG - GP Practice or Residence'
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CALCULATE VALUES FOR NEW CCGS / REGIONS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AWTNewCCG') IS NOT NULL
-DROP TABLE #AWTNewCCG
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG
 
 SELECT
 	a.ReportingPeriodEndDate,
@@ -1210,13 +1228,15 @@ SELECT
 	
 	SUM(a.[Two week clock stops]) AS [Two week clock stops],
 	SUM(a.[All clock stops]) AS [All clock stops],
-	CASE WHEN a.[No CCG change] = 1 THEN SUM([Percent two week clock stops]) ELSE SUM(a.[Two week clock stops])/ISNULL(SUM(a.[All clock stops]),0.0) END AS [Percent two week clock stops],
 	SUM(a.[Referrals waiting <2 Weeks]) AS [Referrals waiting <2 Weeks],
-	SUM(a.[All referrals still waiting]) AS [All referrals still waiting]
+	SUM(a.[Referrals waiting >2 Weeks]) AS [Referrals waiting >2 Weeks],
+	SUM(a.[All referrals still waiting]) AS [All referrals still waiting],
+	SUM(a.[All clock stops2]) AS [All clock stops2],
+	SUM(a.[All referrals still waiting2]) AS [All referrals still waiting2]
 
-INTO #AWTNewCCG
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG
 
-FROM #AWTCCG a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTCCG a
 
 GROUP BY a.ReportingPeriodEndDate,a.[CCG code],a.[CCG name],a.[STP code],a.[STP name],a.[Region code],a.[Region name], a.[No CCG change]
 
@@ -1248,13 +1268,16 @@ SELECT
 	'AWT' AS [Breakdown category],
 	MeasureName,
 	SUM(MeasureValue) AS MeasureValue,
-	SUM(CASE WHEN MeasureName = 'Two week clock stops' THEN [All clock stops] END) AS Denominator,
+	SUM(CASE 
+		WHEN MeasureName = 'Two week clock stops' THEN [All clock stops2]
+		WHEN MeasureName = 'Referrals waiting >2 Weeks' THEN [All referrals still waiting2] 
+	END) AS Denominator,
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AWTNewCCG a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG a
 
-UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+UNPIVOT (MeasureValue FOR MeasureName IN ([All clock stops],[Two week clock stops],[Referrals waiting <2 Weeks],[Referrals waiting >2 Weeks],[All referrals still waiting])) c
 
 GROUP BY ReportingPeriodEndDate, [Region code],	[Region name], MeasureName
 
@@ -1282,13 +1305,16 @@ SELECT
 	'AWT' AS [Breakdown category],
 	MeasureName,
 	SUM(MeasureValue) AS MeasureValue,
-	SUM(CASE WHEN MeasureName = 'Two week clock stops' THEN [All clock stops] END) AS Denominator,
+	SUM(CASE 
+		WHEN MeasureName = 'Two week clock stops' THEN [All clock stops2]
+		WHEN MeasureName = 'Referrals waiting >2 Weeks' THEN [All referrals still waiting2] 
+	END) AS Denominator,
 	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AWTNewCCG a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG a
 
-UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+UNPIVOT (MeasureValue FOR MeasureName IN ([All clock stops],[Two week clock stops],[Referrals waiting <2 Weeks],[Referrals waiting >2 Weeks],[All referrals still waiting])) c
 
 GROUP BY ReportingPeriodEndDate, [STP code], [STP name], MeasureName
 
@@ -1316,13 +1342,16 @@ SELECT
 	'AWT' AS [Breakdown category],
 	MeasureName,
 	MeasureValue,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [All clock stops] END AS Denominator,
-	CASE WHEN MeasureName = 'Two week clock stops' THEN [Percent two week clock stops] END AS UpperLimit,
+	CASE 
+		WHEN MeasureName = 'Two week clock stops' THEN [All clock stops2]
+		WHEN MeasureName = 'Referrals waiting >2 Weeks' THEN [All referrals still waiting2] 
+	END AS Denominator,
+	NULL AS UpperLimit,
 	NULL AS LowerLimit
 
-FROM #AWTNewCCG a
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_EIP_AWTNewCCG a
 
-UNPIVOT (MeasureValue FOR MeasureName IN ([Two week clock stops],[Referrals waiting <2 Weeks],[All referrals still waiting])) c
+UNPIVOT (MeasureValue FOR MeasureName IN ([All clock stops],[Two week clock stops],[Referrals waiting <2 Weeks],[Referrals waiting >2 Weeks],[All referrals still waiting])) c
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 MANUALLY AMEND MHSDS ORG NAMES TO MATCH THOSE IN
@@ -1340,3 +1369,25 @@ UPDATE [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_EIPTT]
 SET [Provider name] = 'INSIGHT TEAM, PLYMOUTH'
 
 WHERE [Provider code] IN ('NR5','NKD')
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DROP TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Activity
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Agg
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Agg2
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AggMainDash
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Ass
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AssAgg
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AssOrder
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AWTCCG
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AWTNewCCG
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_AWTPrep
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_BedDays
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Cumulative
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_FandL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Master
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_ProcAgg
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Ref
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_EIP_Score
