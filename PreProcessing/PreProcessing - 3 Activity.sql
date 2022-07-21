@@ -1,15 +1,3 @@
-USE [NHSE_Sandbox_MentalHealth]
-GO
-/****** Object:  StoredProcedure [dbo].[PreProc 3 - Activity]    Script Date: 12/04/2022 10:19:15 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-ALTER PROCEDURE [dbo].[PreProc 3 - Activity]
-AS
-BEGIN
-
 DECLARE @EndRP INT
 DECLARE @FYStart INT
 
@@ -99,9 +87,9 @@ SELECT
 	i.[IndirectActTime],
 	i.[DurationIndirectAct],
 	i.[MHS204UniqID],
-	ROW_NUMBER () OVER(PARTITION BY i.UniqServReqID, i.IndirectActDate, i.IndirectActTime ORDER BY i.IndirectActTime DESC) AS Der_ActRN
+	ROW_NUMBER () OVER(PARTITION BY i.UniqServReqID, i.IndirectActDate, i.IndirectActTime ORDER BY i.MHS204UniqID DESC) AS Der_ActRN
 
-INTO #Indirect
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_PreProc_Indirect
 
 FROM [NHSE_MH_PrePublication].[Test].[MHS204IndirectActivity] i
 
@@ -165,12 +153,19 @@ SELECT
 	c.[ClinContDurOfCareCont] AS [Der_ContactDuration],
 	'DIRECT' AS [Der_ActivityType],
 	c.[MHS201UniqID] AS [Der_ActivityUniqID],
-	NULL AS [Der_ContactOrder],
-	NULL AS [Der_FYContactOrder],
-	NULL AS [Der_DirectContactOrder],
-	NULL AS [Der_FYDirectContactOrder],
-	NULL AS [Der_FacetoFaceContactOrder],
-	NULL AS [Der_FYFacetoFaceContactOrder]
+	CASE 
+		WHEN c.AttendOrDNACode IN ('5','6') AND (c.[ConsMechanismMH] IN ('01', '02', '04', '11') 
+		OR c.OrgIDProv = 'DFC' AND c.[ConsMechanismMH] IN ('05','09', '10', '13')) 
+		THEN 1 ELSE NULL 
+	END AS [Der_Contact],
+	CASE 
+		WHEN c.AttendOrDNACode IN ('5','6') AND c.[ConsMechanismMH] IN ('01', '02', '04', '11') 
+		THEN 1 ELSE NULL 
+	END AS [Der_DirectContact],
+	CASE 
+		WHEN c.AttendOrDNACode IN ('5','6') AND c.[ConsMechanismMH] IN ('01', '11') 
+		THEN 1 ELSE NULL 
+	END AS [Der_FacetoFaceContact]
 
 FROM [NHSE_MH_PrePublication].[Test].[MHS201CareContact] c
 
@@ -221,14 +216,11 @@ SELECT
 	i.[DurationIndirectAct] AS [Der_ContactDuration],
 	'INDIRECT' AS [Der_ActivityType],
 	i.[MHS204UniqID] AS [Der_ActivityUniqID],
-	NULL AS [Der_ContactOrder],
-	NULL AS [Der_FYContactOrder],
-	NULL AS [Der_DirectContactOrder],
-	NULL AS [Der_FYDirectContactOrder],
-	NULL AS [Der_FacetoFaceContactOrder],
-	NULL AS [Der_FYFacetoFaceContactOrder]
+	1 AS [Der_Contact],
+	NULL AS [Der_DirectContact],
+	NULL AS [Der_FacetoFaceContact]
 
-FROM #Indirect i
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_PreProc_Indirect i
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON h.UniqMonthID = i.UniqMonthID
 
@@ -244,133 +236,6 @@ SELECT
 	GETDATE() AS [TimeStamp]
 
 WAITFOR DELAY '00:00:01'
-
-/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-ACTIVITY - BUILD DERIVATIONS					
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
-
- --LOG START
-
- INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'Activity Derivations Start' AS Step,
-	GETDATE() AS [TimeStamp]
-
---START CODE
-
----- ATTENDED OR INDIRECT CONTACT ORDER 
-
-SELECT 
-	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYContactOrder
-
-INTO #ContOrder_Temp
-
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a  
-
-WHERE a.UniqMonthID < 1459 AND ((a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.ConsMediumUsed NOT IN ('05','06') OR OrgIDProv = 'DFC' AND a.ConsMediumUsed IN ('05','06'))) OR a.[Der_ActivityType] = 'INDIRECT') OR
-	a.UniqMonthID >= 1459 AND ((a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.ConsMediumUsed IN ('01', '02', '04', '11') OR OrgIDProv = 'DFC' AND a.ConsMediumUsed IN ('05','09', '10', '13'))) OR a.[Der_ActivityType] = 'INDIRECT')
-
----- ATTENDED DIRECT CONTACT ORDER 
-
-SELECT 
-	a.Der_RecordID, 
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_DirectContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYDirectContactOrder
-
-INTO #DirectOrder_Temp
-
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a  
-
-WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.UniqMonthID < 1459 AND a.ConsMediumUsed NOT IN ('05','06') OR a.UniqMonthID >= 1459 AND a.ConsMediumUsed IN ('01', '02', '04', '11'))
-
---- DIRECT FACE TO FACE CONTACT ORDER 
-
-SELECT 
-	a.Der_RecordID,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FacetoFaceContactOrder,
-	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN a.UniqServReqID ELSE a.Person_ID END, a.UniqServReqID, a.Der_FY ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_FYFacetoFaceContactOrder
-
-INTO #F2F_Temp 
-
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a 
-
-WHERE a.[Der_ActivityType] = 'DIRECT' AND a.AttendOrDNACode IN ('5','6') AND (a.UniqMonthID < 1459 AND a.ConsMediumUsed IN ('01', '03') OR a.UniqMonthID >= 1459 AND a.ConsMediumUsed IN ('01', '11')) 
-
----- COMBINE TEMP TABLES
- 
-SELECT 
-	a.Der_RecordID,
-	a.Der_ContactOrder,
-	a.Der_FYContactOrder,
-	b.Der_FacetoFaceContactOrder,
-	b.Der_FYFacetoFaceContactOrder,
-	c.Der_DirectContactOrder,
-	c.Der_FYDirectContactOrder
-
-INTO #ActTemp
-
-FROM #ContOrder_Temp a 
-
-LEFT JOIN #F2F_Temp b ON a.Der_RecordID = b.Der_RecordID
-
-LEFT JOIN #DirectOrder_Temp c ON a.Der_RecordID = c.Der_RecordID 
-
--- LOG END
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'Activity Derivations End' AS Step,
-	GETDATE() AS [TimeStamp]
-
-WAITFOR DELAY '00:00:01'
-
-/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-ACTIVITY - UPDATE DERIVATIONS					
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
-
- --LOG START
-
- INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'Activity Update Start' AS Step,
-	GETDATE() AS [TimeStamp]
-
---START CODE
-
-UPDATE a
-
-SET 
-	a.Der_ContactOrder = t.Der_ContactOrder,
-	a.Der_FYContactOrder = t.Der_FYContactOrder,
-	a.Der_DirectContactOrder = t.Der_DirectContactOrder,
-	a.Der_FYDirectContactOrder = t.Der_FYDirectContactOrder,
-	a.Der_FacetoFaceContactOrder = t.Der_FacetoFaceContactOrder,
-	a.Der_FYFacetoFaceContactOrder = t.Der_FYFacetoFaceContactOrder
-		
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Activity] a
-
-LEFT JOIN #ActTemp t ON t.Der_RecordID = a.Der_RecordID
-
-WHERE a.UniqMonthID >= @FYStart
-
--- LOG END
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'Activity Update End' AS Step,
-	GETDATE() AS [TimeStamp]
-	
-WAITFOR DELAY '00:00:01'	
 	
 /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ACTIVITY - RECREATE INDEXES
@@ -396,6 +261,33 @@ INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
 SELECT
 	@EndRP AS [Month],
 	'Activity Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ACTIVITY - DROP TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Activity Drop Tables Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- DROP TABLES
+
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_PreProc_Indirect 
+
+
+-- LOG END
+
+INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Activity Drop Tables End' AS Step,
 	GETDATE() AS [TimeStamp]
 
 END
