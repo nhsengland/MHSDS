@@ -1,14 +1,3 @@
-USE [NHSE_Sandbox_MentalHealth]
-GO
-/****** Object:  StoredProcedure [dbo].[Reporting_MHSDSDQDashboard]    Script Date: 24/05/2022 10:03:36 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-ALTER PROCEDURE [dbo].[Reporting_MHSDSDQDashboard]
-AS
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 DQ DASHBOARD
 ASSET: PRE-PROCESSED TABLES
@@ -36,17 +25,6 @@ DECLARE @ReportingPeriodStart DATE
 SET @ReportingPeriodStart = (SELECT ReportingPeriodEndDate
 FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
 WHERE UniqMonthID = @StartRP)
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-LOG START
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'MHSDS DQ Report Start' AS Step,
-	GETDATE() AS [TimeStamp]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET DISTINCT LIST OF PROVIDERS
@@ -336,7 +314,7 @@ FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
 
-WHERE a.UniqMonthID >= @StartRP
+WHERE a.UniqMonthID >= @StartRP AND a.AttendOrDNACode IN ('5','6')
 
 GROUP BY a.ReportingPeriodEndDate, a.OrgIDProv
 
@@ -418,14 +396,3 @@ LEFT JOIN #MHSDSOrgs m ON a.[Provider code] = m.OrgIDProvider
 LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies) p ON m.RegionCode = p.Region_Code
 
 WHERE a.[Provider name] IS NULL
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-LOG END
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'MHSDS DQ Report Complete' AS Step,
-	GETDATE() AS [TimeStamp]
