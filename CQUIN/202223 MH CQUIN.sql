@@ -1,14 +1,3 @@
-USE [NHSE_Sandbox_MentalHealth]
-GO
-/****** Object:  StoredProcedure [dbo].[Reporting_CQUIN22/23]    Script Date: 09/06/2022 08:36:11 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-ALTER PROCEDURE [dbo].[Reporting_CQUIN22/23]
-AS
-
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CQUIN REPORTING
 
@@ -35,17 +24,6 @@ DECLARE @ReportingPeriodEnd DATE
 SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate
 FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
 WHERE Der_MostRecentFlag = 'Y') -- to get the date of the last performance window
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-LOG START
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'CQUIN Report Start' AS Step,
-	GETDATE() AS [TimeStamp]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ALL CLOSED REFERRALS AND OPEN REFERRALS FOR 
@@ -106,23 +84,52 @@ IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont') IS NOT NULL
 DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
 
 SELECT
-	r.UniqMonthID,
-	r.Der_PersonID,
-	r.UniqServReqID,
-	r.RecordNumber,
-	r.Der_ServiceType,
-	SUM(CASE WHEN a.Der_FY = r.Der_FY AND a.Der_ActivityType = 'DIRECT' AND a.Der_FYContactOrder IS NOT NULL THEN 1 ELSE 0 END) AS Der_ContDirCYP, --counting attended direct activity (excluding SMS or email) for the <18s in the FY
-	SUM(CASE WHEN a.Der_FY = r.Der_FY AND a.Der_ActivityType = 'INDIRECT' AND a.Der_FYContactOrder IS NOT NULL THEN 1 ELSE 0 END) AS Der_ContIndCYP, --counting indirect activity (excluding SMS or email) for the <18s in the FY
-	MAX(CASE WHEN a.Der_FY = r.Der_FY THEN a.Der_FYDirectContactOrder END) AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
-	MAX(CASE WHEN a.Der_FY = r.Der_FY THEN a.Der_FYFacetoFaceContactOrder END) AS Der_ContF2F, -- counting face to face contacts only for perinatal services in the FY
-	MAX(CASE WHEN a.Der_ContactOrder = 1 THEN a.Der_ContactDate ELSE NULL END) AS Der_FirstContactDate, -- get first contact date for referral 
-	MAX(CASE WHEN a.Der_ContactOrder = 2 THEN a.Der_ContactDate ELSE NULL END) AS Der_SecondContactDate  -- get second contact date for referral
+	a.UniqMonthID,
+	a.Der_FY,
+	CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END AS Der_PersonID,
+	a.UniqServReqID,
+	a.RecordNumber,
+	a.Der_ActivityType,
+	a.Der_ContactDate,
+	a.Der_Contact,
+	a.Der_DirectContact,
+	a.Der_FacetoFaceContact,
+	ROW_NUMBER() OVER (PARTITION BY CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END, a.UniqServReqID ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS ContRN
 
 INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
 
 FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef r
 
-INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END = r.Der_PersonID AND a.UniqServReqID = r.UniqServReqID AND a.UniqMonthID <= r.UniqMonthID
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID
+
+WHERE a.Der_Contact IS NOT NULL -- to remove contacts that were not attended
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE CONTACTS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContAgg') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContAgg
+
+SELECT
+	r.UniqMonthID,
+	r.Der_PersonID,
+	r.UniqServReqID,
+	r.RecordNumber,
+	r.Der_ServiceType,
+	ISNULL(SUM(CASE WHEN a.Der_FY = r.Der_FY AND a.Der_ActivityType = 'DIRECT' THEN a.Der_Contact END),0) AS Der_ContDirCYP, --counting attended direct activity (excluding SMS or email) for the <18s in the FY
+	ISNULL(SUM(CASE WHEN a.Der_FY = r.Der_FY AND a.Der_ActivityType = 'INDIRECT' THEN a.Der_Contact ELSE 0 END),0) AS Der_ContIndCYP, --counting indirect activity for the <18s in the FY
+	ISNULL(SUM(CASE WHEN a.Der_FY = r.Der_FY THEN a.Der_DirectContact ELSE 0 END),0) AS Der_ContDir, -- excluding indirect and direct SMS or email activity for >=18s in the FY
+	ISNULL(SUM(CASE WHEN a.Der_FY = r.Der_FY THEN a.Der_FacetoFaceContact ELSE 0 END),0) AS Der_ContF2F, -- counting face to face contacts only for perinatal services in the FY
+	MIN(a.Der_ContactDate) AS Der_FirstContactDate -- get first contact date for referral 
+	
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContAgg
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef r
+
+INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a ON CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END = r.Der_PersonID 
+	AND a.UniqServReqID = r.UniqServReqID AND a.UniqMonthID <= r.UniqMonthID
+	AND a.Der_Contact = 1 -- to remove contacts that were not attended
 
 GROUP BY r.Der_FY, r.UniqMonthID, r.Der_PersonID, r.UniqServReqID, r.RecordNumber, r.OrgIDProv, r.Der_ServiceType
 
@@ -138,7 +145,6 @@ SELECT
 	c.RecordNumber,
 	c.Der_ServiceType,
 	c.Der_FirstContactDate,
-	c.Der_SecondContactDate,
 	r.CYPMH,
 	a.Der_AssToolCompDate, -- the completion date of the assessment
 	a.CodedAssToolType,
@@ -149,7 +155,7 @@ SELECT
 
 INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont c
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContAgg c
 
 INNER JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Assessments a ON CASE WHEN a.OrgIDProv = 'DFC' THEN '1' ELSE a.Person_ID END = c.Der_PersonID AND a.UniqServReqID = c.UniqServReqID AND a.UniqMonthID <= c.UniqMonthID -- assessments can't take place in the future
 
@@ -237,8 +243,8 @@ SELECT
 
 FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss a
 
-WHERE a.Der_AssToolCompDate >= a.Der_SecondContactDate AND a.Der_AssOrderAsc > 1 
-AND a.Der_ServiceType = 'CYP' -- must be on or after the second contact
+WHERE a.Der_AssToolCompDate >= a.Der_FirstContactDate AND a.Der_AssOrderAsc > 1 
+AND a.Der_ServiceType = 'CYP' -- must be on or after the first contact
 AND a.CYPMH = 'Y' -- to limit to specific CYPMH assessments
 
 GROUP BY a.UniqServReqID, a.RecordNumber, a.Der_AssessmentToolName, a.CodedAssToolType
@@ -278,7 +284,7 @@ INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster
 
 FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef r
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont c ON c.RecordNumber = r.RecordNumber AND c.UniqServReqID = r.UniqServReqID
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContAgg c ON c.RecordNumber = r.RecordNumber AND c.UniqServReqID = r.UniqServReqID
 
 LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss a1 ON a1.RecordNumber = r.RecordNumber AND a1.UniqServReqID = r.UniqServReqID
 
@@ -661,26 +667,15 @@ WHERE u.UniqMonthID >= @endRP - 12
 DROP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINDuplicate
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINLastAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINCont
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINContext
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINDuplicate
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINFirstAss
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINLastAss
 --DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINMaster
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefAgg
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefFinal
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
---DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
-
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-LOG END
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-
-INSERT INTO [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_QueryStatus]
-
-SELECT
-	@EndRP AS [Month],
-	'CQUIN Report End' AS Step,
-	GETDATE() AS [TimeStamp]
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRef
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefAgg
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINRefFinal
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINAssAgg
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUINUnpiv
