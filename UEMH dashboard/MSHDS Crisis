@@ -15,7 +15,6 @@ DECLARE @RP_ENDDATE DATE
 DECLARE @RP_ENDDATE_START DATE
 
 SET @RP_START = 1405 
---SET @RP_START = 1459 -- for testing only 
 SET @RP_END = (SELECT MAX(UniqMonthID) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header) 
 
 SET @RP_STARTDATE = (SELECT MIN(ReportingPeriodStartDate) FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE UniqMonthID = @RP_START)
