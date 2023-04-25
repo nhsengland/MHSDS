@@ -228,7 +228,7 @@ SELECT
 	END as AgeCat
 	,d.MHDropInContactServiceType
 	,CASE WHEN d.MHDropInContactServiceType = 'A19' THEN 'NHS Crisis Services' WHEN d.MHDropInContactServiceType = 'A21' THEN 'Other Crisis Services' END AS TeamTypeCat 
-	,CASE WHEN d.MHDropInContactServiceType = 'A19' THEN '24/7 Crisis Response Line'  WHEN d.MHDropInContactServiceType = 'A21' THEN 'Crisis Café/Safe Haven/Sanctuary Service'  END AS TeamType
+	,CASE WHEN d.MHDropInContactServiceType = 'A19' THEN '24/7 Crisis Response Line'  WHEN d.MHDropInContactServiceType = 'A21' THEN 'Crisis CafÃ©/Safe Haven/Sanctuary Service'  END AS TeamType
 	,d.ConsMechanismMH
 	,CASE 
 		WHEN d.ConsMechanismMH = '01' THEN 'Face to face' 
