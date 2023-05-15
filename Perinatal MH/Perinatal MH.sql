@@ -1,3 +1,4 @@
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 PERINATAL DASHBOARD 
 
@@ -36,9 +37,11 @@ SET @RPEndDate = (SELECT ReportingPeriodEndDate
        FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
        WHERE UniqMonthID = @EndRP)
 
+
 SET @RPEndDatePerformance = (SELECT ReportingPeriodEndDate
        FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header]
        WHERE UniqMonthID = @LatestPerformanceSub)
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -50,8 +53,8 @@ CREATE DATA FOR PERINATAL MH DASHBOARD EXTRACT
 IDENTIFY REFERRALS TO PERINATAL SERVICES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#refs') IS NOT NULL
-DROP TABLE #refs
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_refs') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_refs
 
 SELECT
 	CASE 
@@ -75,7 +78,7 @@ SELECT
 	r.EthnicCategory,
 	CASE 
 		WHEN e.Category IS NULL THEN  'Missing / invalid'
-		WHEN e.Category = '' THEN 'Missing / invalid'
+		WHEN e.Category = '' THEN 'Not known'
 		ELSE CONCAT(e.[Category],' - ',e.[Main_Description_60_Chars])
 	END AS Ethnicity,
 	r.AgeServReferRecDate,
@@ -83,13 +86,15 @@ SELECT
 	r.ServDischDate,
 	r.ReferralRequestReceivedDate,
 	r.SourceOfReferralMH,
-	CASE WHEN r.ServDischDate IS NULL THEN 1 ELSE 0 END AS Caseload,
+	r.ReferRejectionDate,
+	--CASE WHEN r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS OpenReferrals, -- original logic
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS OpenReferrals,
 	CASE WHEN r.ReferralRequestReceivedDate BETWEEN h.ReportingPeriodStartDate AND h.ReportingPeriodEndDate THEN 1 ELSE 0 END AS NewReferrals,
 	CASE WHEN r.ServDischDate BETWEEN h.ReportingPeriodStartDate AND h.ReportingPeriodEndDate THEN 1 ELSE 0 END AS ClosedReferrals,
 	h.ReportingPeriodStartDate,
 	h.ReportingPeriodEndDate
 
-INTO #Refs
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Refs
 
 FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r
 
@@ -112,11 +117,12 @@ LEFT JOIN [NHSE_UKHF].[Data_Dictionary].[vw_Ethnic_Category_Code_SCD] e ON r.Eth
 GET ATTENDED, F2F/VC CARE CONTACTS WITH PERINATAL MH SERVICES OVER THE REPORTING PERIOD 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Conts') IS NOT NULL
-DROP TABLE #Conts
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Conts') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Conts
 
 SELECT
 	   r.UniqMonthID,
+	   r.ReportingPeriodEndDate,
 	   r.Der_FY,
        r.Person_ID,
        r.RecordNumber,
@@ -125,26 +131,54 @@ SELECT
        r.UniqServReqID,
        c.UniqCareContID,
 	   c.Der_ContactDate,
+	   c.Der_FacetoFaceContact,
        r.STP_Code,
        r.Region_Code
 
-INTO #Conts
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Conts
 
-FROM #Refs r
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Refs r
 
 INNER JOIN [NHSE_Sandbox_MentalHealth].dbo.PreProc_Activity c ON r.RecordNumber = c.RecordNumber 
        AND r.UniqServReqID = c.UniqServReqID 
-       AND c.Der_FacetoFaceContactOrder IS NOT NULL -- to limit to attended, Face to Face or Videoconferencing Perinatal contacts only 
+       AND c.Der_FacetoFaceContact IS NOT NULL -- to limit to attended, Face to Face or Videoconferencing Perinatal contacts only 
 	   AND c.UniqMonthID BETWEEN @StartRP AND @EndRP
 
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-IDENTIFYING FIRST ACTIVITY IN THE FINANCIAL YEAR, FOR EACH PID/REFERRAL IN EACH ORGANISATION
+GET CUMULATIVE ACTIVITY PER PERSON/REFERRAL - FOR CASELOAD CALCULATION 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#contYTD') IS NOT NULL
-DROP TABLE #contYTD
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Cumulative') IS NOT NULL
+DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Cumulative
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+
+	-- cumulative activity
+	MAX(c.Der_ContactDate) AS Der_LastContact,
+	SUM(c.Der_FacetoFaceContact) AS Der_CumulativeContacts
+
+INTO NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Cumulative
+
+FROM NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Refs r
+
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Conts c ON r.Person_ID = c.Person_ID AND r.UniqServReqID = c.UniqServReqID AND c.ReportingPeriodEndDate <= r.ReportingPeriodEndDate 
+
+GROUP BY r.RecordNumber, r.UniqMonthID, r.ReportingPeriodEndDate, r.UniqServReqID, r.Person_ID
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IDENTIFYING FIRST ACTIVITY IN THE FINANCIAL YEAR, FOR EACH PID IN EACH ORGANISATION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_contYTD') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_contYTD
 
 SELECT
 	   c.UniqMonthID,
@@ -160,9 +194,9 @@ SELECT
        ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.STP_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessSTPRN', -- flags a woman's first contact of financial year at STP level
        ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Region_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRegionRN' -- flags a woman's first contact of financial year at Region level
 
-INTO #ContYTD
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_contYTD
 
-FROM #Conts c
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Conts c
 
 WHERE c.UniqMonthID BETWEEN @StartRP AND @EndRP -- to identify a woman's first attended, face to face contact with Perinatla services in this Financial year 
 
@@ -172,8 +206,8 @@ WHERE c.UniqMonthID BETWEEN @StartRP AND @EndRP -- to identify a woman's first a
 LINK CONTACTS TO REFERRAL - ADD IN CASELOAD DEMOGRAPHIC AND REFERRAL SOURCE FLAGS 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Master') IS NOT NULL
-DROP TABLE #Master
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Master') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Master
 
 SELECT DISTINCT
 		r.SubmissionType,
@@ -181,46 +215,135 @@ SELECT DISTINCT
 		r.Der_FY,
 		r.Person_ID,
 		r.UniqServReqID,
+		r.RecordNumber, 
 		r.OrgIDProv,
 		r.OrgIDCCGRes,
 		r.STP_Code,
 		r.Region_Code,
-		
+
+		r.OpenReferrals,
+		r.NewReferrals,
+		r.ClosedReferrals,
+
+		----Open referrals - demographic breakdowns
 		--Deprivation flag
-		CASE WHEN r.ServDischDate IS NULL AND r.IMD_Decile IN (1,2) THEN 1 ELSE 0 END AS Caseload_IMDQuintile1,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.IMD_Decile IN (1,2) THEN 1 ELSE 0 END AS OpenReferrals_IMDQuintile1,
 
 		--Ethnicity flags
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity IN ('White - British','White - Irish')THEN 1 ELSE 0 END AS Caseload_Ethnicity_WhiteBritishIrish,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity = 'White - Any other white background' THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherWhite,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity IN ('Mixed - White and Black Caribbean','Mixed - White and Black African','Mixed - White and Asian','Mixed - Any other mixed background') 
-		THEN 1 ELSE 0 END AS Caseload_Ethnicity_Mixed,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity IN ('Asian or Asian British - Indian','Asian or Asian British - Pakistani','Asian or Asian British - Bangladeshi',
-		'Asian or Asian British - Any other Asian background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_AsianAsianBritish,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity IN ('Black or Black British - Caribbean','Black or Black British - African','Black or Black British - Any other Black background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_BlackBlackBritish,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity IN ('Other ethnic groups - Chinese','Other ethnic groups - Any other ethnic group') THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherEthnicGroups,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity = 'Other ethnic groups - Not stated' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityNotStated,
-		CASE WHEN r.ServDischDate IS NULL AND r.Ethnicity = 'Missing / invalid' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityMissingInvalid,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('White - British','White - Irish')THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_WhiteBritishIrish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'White - Any other white background' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_OtherWhite,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Mixed - White and Black Caribbean','Mixed - White and Black African','Mixed - White and Asian','Mixed - Any other mixed background') 
+		THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_Mixed,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Asian or Asian British - Indian','Asian or Asian British - Pakistani','Asian or Asian British - Bangladeshi',
+		'Asian or Asian British - Any other Asian background') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_AsianAsianBritish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Black or Black British - Caribbean','Black or Black British - African','Black or Black British - Any other Black background') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_BlackBlackBritish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Other ethnic groups - Chinese','Other ethnic groups - Any other ethnic group') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_OtherEthnicGroups,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Other ethnic groups - Not stated' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityNotStated,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Missing / invalid' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityMissingInvalid,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Not known' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityNotKnown,
 
 		--Age flags
-		CASE WHEN r.ServDischDate IS NULL AND r.AgeServReferRecDate BETWEEN 16 AND 20 THEN 1 ELSE 0 END AS Caseload_Age_16to20,
-		CASE WHEN r.ServDischDate IS NULL AND r.AgeServReferRecDate BETWEEN 21 AND 25 THEN 1 ELSE 0 END AS Caseload_Age_21to25,
-		CASE WHEN r.ServDischDate IS NULL AND r.AgeServReferRecDate BETWEEN 26 AND 39 THEN 1 ELSE 0 END AS Caseload_Age_26to39,
-		CASE WHEN r.ServDischDate IS NULL AND r.AgeServReferRecDate BETWEEN 40 AND 60 THEN 1 ELSE 0 END AS Caseload_Age_40Plus,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 16 AND 20 THEN 1 ELSE 0 END AS OpenReferrals_Age_16to20,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 21 AND 25 THEN 1 ELSE 0 END AS OpenReferrals_Age_21to25,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 26 AND 39 THEN 1 ELSE 0 END AS OpenReferrals_Age_26to39,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 40 AND 60 THEN 1 ELSE 0 END AS OpenReferrals_Age_40Plus,
 
-		--Open caseload referral source flags
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS Caseload_Referral_GP,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS Caseload_Referral_OtherPrimaryCare,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareHealthVisitor,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareMaternityService,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1') THEN 1 ELSE 0 END AS Caseload_Referral_SecondaryCare,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS Caseload_Referral_SelfReferral,
-		CASE WHEN r.ServDischDate IS NULL AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
-			THEN 1 ELSE 0 END AS Caseload_Referral_OtherReferralSource,
-		CASE WHEN r.ServDischDate IS NULL AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1')
+		--OpenReferrals referral source flags
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS OpenReferrals_Referral_GP,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS OpenReferrals_Referral_OtherPrimaryCare,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS OpenReferrals_Referral_PrimaryCareHealthVisitor,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS OpenReferrals_Referral_PrimaryCareMaternityService,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1') THEN 1 ELSE 0 END AS OpenReferrals_Referral_SecondaryCare,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS OpenReferrals_Referral_SelfReferral,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
+			THEN 1 ELSE 0 END AS OpenReferrals_Referral_OtherReferralSource,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1')
 				OR r.SourceOfReferralMH IS NULL)
+			THEN 1 ELSE 0 END AS OpenReferrals_Referral_MissingInvalidReferralSource,
+
+
+		----Caseload - demographic breakdowns
+		--Caseload measures
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					THEN 1 ELSE 0 END AS [Caseload],
+		--Deprivation flag
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)	
+					AND r.IMD_Decile IN (1,2) THEN 1 ELSE 0 END AS Caseload_IMDQuintile1,
+		--Ethnicity flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('White - British','White - Irish')THEN 1 ELSE 0 END AS Caseload_Ethnicity_WhiteBritishIrish,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+				    AND r.Ethnicity = 'White - Any other white background' THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherWhite,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('Mixed - White and Black Caribbean','Mixed - White and Black African','Mixed - White and Asian','Mixed - Any other mixed background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_Mixed,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('Asian or Asian British - Indian','Asian or Asian British - Pakistani','Asian or Asian British - Bangladeshi','Asian or Asian British - Any other Asian background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_AsianAsianBritish,	
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload) 
+					AND r.Ethnicity IN ('Black or Black British - Caribbean','Black or Black British - African','Black or Black British - Any other Black background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_BlackBlackBritish,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity IN ('Other ethnic groups - Chinese','Other ethnic groups - Any other ethnic group') THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherEthnicGroups,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Other ethnic groups - Not stated' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityNotStated,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Missing / invalid' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityMissingInvalid,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Not known' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityNotKnown,
+
+		--Age flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 16 AND 20 THEN 1 ELSE 0 END AS Caseload_Age_16to20,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 21 AND 25 THEN 1 ELSE 0 END AS Caseload_Age_21to25,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 26 AND 39 THEN 1 ELSE 0 END AS Caseload_Age_26to39,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 40 AND 60 THEN 1 ELSE 0 END AS Caseload_Age_40Plus,
+
+		--Caseload referral source flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS Caseload_Referral_GP,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS Caseload_Referral_OtherPrimaryCare,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareHealthVisitor,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareMaternityService,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1') THEN 1 ELSE 0 END AS Caseload_Referral_SecondaryCare,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS Caseload_Referral_SelfReferral,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
+			THEN 1 ELSE 0 END AS Caseload_Referral_OtherReferralSource,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1')
+					OR r.SourceOfReferralMH IS NULL)
 			THEN 1 ELSE 0 END AS Caseload_Referral_MissingInvalidReferralSource,
 
-		--New referrals referral source flags
+		--New referrals - referral source flags
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
 			AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS New_Referral_GP,
 		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
@@ -241,10 +364,6 @@ SELECT DISTINCT
 				OR r.SourceOfReferralMH IS NULL)
 			THEN 1 ELSE 0 END AS New_Referral_MissingInvalidReferralSource,
 		
-		r.Caseload,
-		r.NewReferrals,
-		r.ClosedReferrals,
-
 		--Access flags
 		CASE WHEN c1.Contacts >0 THEN 1 ELSE NULL END AS AttendedContact,
 		CASE WHEN c2.FYAccessRN = 1 THEN 1 ELSE NULL END AS InMonthAccess,
@@ -253,9 +372,9 @@ SELECT DISTINCT
 		CASE WHEN c2.FYAccessRegionRN = 1 THEN 1 ELSE NULL END AS InMonthAccessReg,
 		CASE WHEN c2.FYAccessEngRN = 1 THEN 1 ELSE NULL END AS InMonthAccessEng
 
-INTO #master
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master
 
-FROM #Refs r
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Refs r
 
 -- Bring through attended contacts in the reporting period
 LEFT JOIN 
@@ -264,24 +383,31 @@ LEFT JOIN
              c.RecordNumber,
              c.UniqServReqID,
              COUNT(c.UniqCareContID) AS Contacts
-       FROM #Conts c
+       FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Conts c
        GROUP BY c.UniqMonthID, c.RecordNumber, c.UniqServReqID) c1
              ON r.RecordNumber = c1.RecordNumber
              AND r.UniqServReqID = c1.UniqServReqID
 
 -- Bring through attended contacts since the start of the financial year
-LEFT JOIN #ContYTD c2 
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ContYTD c2 
        ON r.RecordNumber = c2.RecordNumber
        AND r.UniqServReqID = c2.UniqServReqID
        AND (c2.FYAccessRN = 1 OR c2.FYAccessCCGRN = 1)
+
+-- Bring through cumulative attended contact dates per person / referral - used for Caseload flag
+LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Cumulative cu ON r.RecordNumber = cu.RecordNumber AND r.UniqServReqID = cu.UniqServReqID
+
+
+
+
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET DISTINCT LIST OF DATES 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AllDates') IS NOT NULL
-DROP TABLE #AllDates
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_AllDates') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates
 
 SELECT DISTINCT
 	m.SubmissionType,
@@ -289,9 +415,9 @@ SELECT DISTINCT
 	CAST (d.ReportingPeriodEndDate AS datetime) AS ReportingPeriodEndDate,
 	d.Der_FY
 
-INTO #AllDates
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates
 
-FROM #master m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master m
 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] AS d ON m.UniqMonthID = d.UniqMonthID
 
@@ -300,8 +426,8 @@ LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] AS d ON m.UniqMonth
 GET DISTINCT LIST OF PROVIDER AND COMMISSIONER COMBINATIONS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AllOrgs') IS NOT NULL
-DROP TABLE #AllOrgs
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_AllOrgs') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllOrgs
 
 SELECT DISTINCT
 	OrgIDProv,
@@ -309,17 +435,17 @@ SELECT DISTINCT
 	STP_Code,
 	Region_Code
 
-INTO #AllOrgs
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllOrgs
 
-FROM #master
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 COMBINE LIST OF DATES AND ORGS TO MAKE SURE ALL MONTHS ARE REPORTED AGAINST - PADDING FOR BASE MASTER
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Base') IS NOT NULL
-DROP TABLE #Base
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Base') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Base
 
 SELECT
 	d.SubmissionType,
@@ -331,17 +457,17 @@ SELECT
 	o.STP_Code,
 	o.Region_Code
 
-INTO #Base
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Base
 
-FROM #AllDates d, #AllOrgs o
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllOrgs o
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ASSIGN A VALUE TO EACH MONTH IN PADDED BASE TABLE, FOR EACH PROVIDER/CCG COMBINATION
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#BaseMaster') IS NOT NULL
-DROP TABLE #BaseMaster
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_BaseMaster') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster
 
 SELECT DISTINCT
 	b.SubmissionType,
@@ -367,6 +493,55 @@ SELECT DISTINCT
 	SUM(m.InMonthAccessReg) AS InMonthAccessReg,
 	SUM(m.InMonthAccessEng) AS InMonthAccessEng,
 
+	----Open Referrals
+	--Deprivation flag
+	SUM(m.OpenReferrals_IMDQuintile1) AS [Open Referrals in IMD Quintile 1],
+
+	-- Ethnicity flags
+	SUM(m.OpenReferrals_Ethnicity_WhiteBritishIrish) AS [Open Referrals ethnicity- White British or Irish],
+	SUM(m.OpenReferrals_Ethnicity_OtherWhite) AS [Open Referrals ethnicity - Other White],
+	SUM(m.OpenReferrals_Ethnicity_Mixed) AS [Open Referrals ethnicity - Mixed],
+	SUM(m.OpenReferrals_Ethnicity_AsianAsianBritish) AS [Open Referrals ethnicity - Asian or Asian British],
+	SUM(m.OpenReferrals_Ethnicity_BlackBlackBritish) AS [Open Referrals ethnicity - Black or Black British],
+	SUM(m.OpenReferrals_Ethnicity_OtherEthnicGroups) AS [Open Referrals ethnicity - Other Ethnic Groups],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityNotStated) AS [Open Referrals ethnicity - Not stated],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityMissingInvalid) AS [Open Referrals ethnicity - Missing],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityNotKnown) AS [Open Referrals ethnicity - Not known],
+
+	-- Age flags
+	SUM(m.OpenReferrals_Age_16to20) AS [Open Referrals aged 16 to 20],
+	SUM(m.OpenReferrals_Age_21to25) AS [Open Referrals aged 21 to 25],
+	SUM(m.OpenReferrals_Age_26to39) AS [Open Referrals aged 26 to 39],
+	SUM(m.OpenReferrals_Age_40Plus) AS [Open Referrals aged 40 plus],
+
+	-- Open Referrals flags
+	SUM(m.OpenReferrals) AS [Open Referrals total],
+	SUM(m.OpenReferrals) AS [Open Referrals total 2],	-- duplicate measures for denominator in tableau
+	SUM(m.NewReferrals) AS [New referrals],
+	SUM(m.NewReferrals) AS [New referrals 2], -- duplicate measures for denominator in tableau
+	SUM(m.ClosedReferrals) AS [Closed referrals],
+
+	-- Open Referrals referral source flags
+	SUM(m.OpenReferrals_Referral_GP) AS [Open Referrals referred from GP],
+	SUM(m.OpenReferrals_Referral_OtherPrimaryCare) AS [Open Referrals referred from Other primary care],
+	SUM(m.OpenReferrals_Referral_PrimaryCareHealthVisitor) AS [Open Referrals referred from Primary care health visitor],
+	SUM(m.OpenReferrals_Referral_PrimaryCareMaternityService) AS [Open Referrals referred from Primary care Maternity service],
+	SUM(m.OpenReferrals_Referral_SecondaryCare) AS [Open Referrals referred from Secondary care],
+	SUM(m.OpenReferrals_Referral_SelfReferral) AS [Open Referrals referred from Self referral],
+	SUM(m.OpenReferrals_Referral_OtherReferralSource) AS [Open Referrals referred from Other referral sources],
+	SUM(m.OpenReferrals_Referral_MissingInvalidReferralSource) AS [Open Referrals referred from Missing or Invalid sources],
+
+	-- New referrals referral source flags
+	SUM(m.New_Referral_GP) AS [New Referrals from GP],
+	SUM(m.New_Referral_OtherPrimaryCare) AS [New Referrals from Other primary care],
+	SUM(m.New_Referral_PrimaryCareHealthVisitor) AS [New Referrals from Primary care health visitor],
+	SUM(m.New_Referral_PrimaryCareMaternityService) AS [New Referrals from Primary care Maternity service],
+	SUM(m.New_Referral_SecondaryCare) AS [New Referrals from Secondary care],
+	SUM(m.New_Referral_SelfReferral) AS [New Referrals from Self referral],
+	SUM(m.New_Referral_OtherReferralSource) AS [New Referrals from Other referral sources],
+	SUM(m.New_Referral_MissingInvalidReferralSource) AS [New Referrals from Missing or Invalid sources],
+
+	----Caseload
 	--Deprivation flag
 	SUM(m.Caseload_IMDQuintile1) AS [Caseload in IMD Quintile 1],
 
@@ -379,6 +554,7 @@ SELECT DISTINCT
 	SUM(m.Caseload_Ethnicity_OtherEthnicGroups) AS [Caseload ethnicity - Other Ethnic Groups],
 	SUM(m.Caseload_Ethnicity_EthnicityNotStated) AS [Caseload ethnicity - Not stated],
 	SUM(m.Caseload_Ethnicity_EthnicityMissingInvalid) AS [Caseload ethnicity - Missing],
+	SUM(m.Caseload_Ethnicity_EthnicityNotKnown) AS [Caseload ethnicity - Not known],
 
 	-- Age flags
 	SUM(m.Caseload_Age_16to20) AS [Caseload aged 16 to 20],
@@ -388,10 +564,7 @@ SELECT DISTINCT
 
 	-- Caseload flags
 	SUM(m.Caseload) AS [Caseload total],
-	SUM(m.Caseload) AS [Caseload total 2],	-- duplicate measures for denominator in tableau
-	SUM(m.NewReferrals) AS [New referrals],
-	SUM(m.NewReferrals) AS [New referrals 2], -- duplicate measures for denominator in tableau
-	SUM(m.ClosedReferrals) AS [Closed referrals],
+	SUM(m.Caseload) AS [Caseload total 2],	
 
 	-- Caseload referral source flags
 	SUM(m.Caseload_Referral_GP) AS [Caseload referred from GP],
@@ -401,23 +574,13 @@ SELECT DISTINCT
 	SUM(m.Caseload_Referral_SecondaryCare) AS [Caseload referred from Secondary care],
 	SUM(m.Caseload_Referral_SelfReferral) AS [Caseload referred from Self referral],
 	SUM(m.Caseload_Referral_OtherReferralSource) AS [Caseload referred from Other referral sources],
-	SUM(m.Caseload_Referral_MissingInvalidReferralSource) AS [Caseload referred from Missing or Invalid sources],
+	SUM(m.Caseload_Referral_MissingInvalidReferralSource) AS [Caseload referred from Missing or Invalid sources]
 
-	-- New referrals referral source flags
-	SUM(m.New_Referral_GP) AS [New Referrals from GP],
-	SUM(m.New_Referral_OtherPrimaryCare) AS [New Referrals from Other primary care],
-	SUM(m.New_Referral_PrimaryCareHealthVisitor) AS [New Referrals from Primary care health visitor],
-	SUM(m.New_Referral_PrimaryCareMaternityService) AS [New Referrals from Primary care Maternity service],
-	SUM(m.New_Referral_SecondaryCare) AS [New Referrals from Secondary care],
-	SUM(m.New_Referral_SelfReferral) AS [New Referrals from Self referral],
-	SUM(m.New_Referral_OtherReferralSource) AS [New Referrals from Other referral sources],
-	SUM(m.New_Referral_MissingInvalidReferralSource) AS [New Referrals from Missing or Invalid sources]
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster
 
-INTO #BaseMaster
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Base b 
 
-FROM #Base b 
-
-LEFT JOIN #master m ON b.OrgIDProv = m.OrgIDProv AND b.OrgIDCCGRes = m.OrgIDCCGRes AND b.UniqMonthID = m.UniqMonthID
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master m ON b.OrgIDProv = m.OrgIDProv AND b.OrgIDCCGRes = m.OrgIDCCGRes AND b.UniqMonthID = m.UniqMonthID
 
 LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON b.OrgIDProv = p.Organisation_Code
 
@@ -442,23 +605,21 @@ GROUP BY
 	COALESCE(p.Region_Code,'Missing / Invalid'),
 	COALESCE(p.Region_Name,'Missing / Invalid')
 
-	
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-MONTHLY CASELOAD ACTIVITY EXTRACT
-
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-UNPIVOT AND CREATE MONTHLY ACTIVITY EXTRACT
+
+MONTHLY ACTIVITY EXTRACT
+
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Pivot_Monthly_Extract') IS NOT NULL
-DROP TABLE #Pivot_Monthly_Extract
+IF OBJECT_ID ('[NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
+
+
 
 	SELECT
-		GETDATE() AS ImportDate,
 		ReportingPeriodEndDate,
 		SubmissionType,
 		UniqMonthID,
@@ -473,12 +634,36 @@ DROP TABLE #Pivot_Monthly_Extract
 		[Region name],
 		[Provider region name],
 		CASE 
-			WHEN MeasureName = 'Caseload in IMD Quintile 1' THEN 'Caseload deprivation'
+			WHEN MeasureName LIKE 'Open Referrals%' THEN 'Open Referrals'
+			WHEN MeasureName LIKE 'Caseload%' THEN 'Caseload'
+			ELSE MeasureName END 
+			AS Category1,
+			
+		CASE		
+			WHEN MeasureName IN 
+			('Open Referrals ethnicity- White British or Irish','Open Referrals ethnicity - Other White','Open Referrals ethnicity - Mixed',
+			'Open Referrals ethnicity - Asian or Asian British','Open Referrals ethnicity - Black or Black British','Open Referrals ethnicity - Other Ethnic Groups',
+			'Open Referrals ethnicity - Not stated','Open Referrals ethnicity - Missing','Open Referrals ethnicity - Not known') 
+			THEN 'Ethnicity'
+			
+			WHEN MeasureName IN 
+			('Open Referrals aged 16 to 20', 'Open Referrals aged 21 to 25','Open Referrals aged 26 to 39','Open Referrals aged 40 plus') 
+			THEN 'Open Referrals age'
+			
+			WHEN MeasureName IN 
+			('Open Referrals referred from GP','Open Referrals referred from Other primary care','Open Referrals referred from Primary care health visitor','Open Referrals referred from Primary care Maternity service',
+			'Open Referrals referred from Secondary care','Open Referrals referred from Self referral','Open Referrals referred from Other referral sources','Open Referrals referred from Missing or Invalid sources') 
+			THEN 'Open Referrals referral source'
+			
+			WHEN MeasureName IN 
+			('New Referrals from GP','New Referrals from Other primary care','New Referrals from Primary care health visitor','New Referrals from Primary care Maternity service','New Referrals from Secondary care',
+			'New Referrals from Self referral','New Referrals from Other referral sources','New Referrals from Missing or Invalid sources') 
+			THEN 'New referrals referral source'
 		
 			WHEN MeasureName IN 
 			('Caseload ethnicity- White British or Irish','Caseload ethnicity - Other White','Caseload ethnicity - Mixed',
 			'Caseload ethnicity - Asian or Asian British','Caseload ethnicity - Black or Black British','Caseload ethnicity - Other Ethnic Groups',
-			'Caseload ethnicity - Not stated','Caseload ethnicity - Missing') 
+			'Caseload ethnicity - Not stated','Caseload ethnicity - Missing','Caseload ethnicity - Not known') 
 			THEN 'Ethnicity'
 			
 			WHEN MeasureName IN 
@@ -489,11 +674,6 @@ DROP TABLE #Pivot_Monthly_Extract
 			('Caseload referred from GP','Caseload referred from Other primary care','Caseload referred from Primary care health visitor','Caseload referred from Primary care Maternity service',
 			'Caseload referred from Secondary care','Caseload referred from Self referral','Caseload referred from Other referral sources','Caseload referred from Missing or Invalid sources') 
 			THEN 'Caseload referral source'
-			
-			WHEN MeasureName IN 
-			('New Referrals from GP','New Referrals from Other primary care','New Referrals from Primary care health visitor','New Referrals from Primary care Maternity service','New Referrals from Secondary care',
-			'New Referrals from Self referral','New Referrals from Other referral sources','New Referrals from Missing or Invalid sources') 
-			THEN 'New referrals referral source'
 
 			ELSE MeasureName END AS Categories,
 
@@ -502,8 +682,17 @@ DROP TABLE #Pivot_Monthly_Extract
 
 		CASE 
 			WHEN MeasureName IN 
+			('Open Referrals ethnicity- White British or Irish','Open Referrals ethnicity - Other White','Open Referrals ethnicity - Mixed',
+			'Open Referrals ethnicity - Asian or Asian British','Open Referrals ethnicity - Black or Black British', 'Open Referrals ethnicity - Other Ethnic Groups','Open Referrals ethnicity - Not stated','Open Referrals ethnicity - Missing','Open Referrals ethnicity - Not known',
+			'Open Referrals aged 16 to 20', 'Open Referrals aged 21 to 25','Open Referrals aged 26 to 39','Open Referrals aged 40 plus',
+			'Open Referrals referred from GP','Open Referrals referred from Other primary care','Open Referrals referred from Primary care health visitor','Open Referrals referred from Primary care Maternity service',
+			'Open Referrals referred from Secondary care','Open Referrals referred from Self referral','Open Referrals referred from Other referral sources','Open Referrals referred from Missing or Invalid sources',
+			'Open Referrals in IMD Quintile 1') 
+			THEN [Open Referrals total 2]
+
+			WHEN MeasureName IN 
 			('Caseload ethnicity- White British or Irish','Caseload ethnicity - Other White','Caseload ethnicity - Mixed',
-			'Caseload ethnicity - Asian or Asian British','Caseload ethnicity - Black or Black British', 'Caseload ethnicity - Other Ethnic Groups','Caseload ethnicity - Not stated','Caseload ethnicity - Missing',
+			'Caseload ethnicity - Asian or Asian British','Caseload ethnicity - Black or Black British', 'Caseload ethnicity - Other Ethnic Groups','Caseload ethnicity - Not stated','Caseload ethnicity - Missing','Caseload ethnicity - Not known',
 			'Caseload aged 16 to 20', 'Caseload aged 21 to 25','Caseload aged 26 to 39','Caseload aged 40 plus',
 			'Caseload referred from GP','Caseload referred from Other primary care','Caseload referred from Primary care health visitor','Caseload referred from Primary care Maternity service',
 			'Caseload referred from Secondary care','Caseload referred from Self referral','Caseload referred from Other referral sources','Caseload referred from Missing or Invalid sources',
@@ -515,13 +704,47 @@ DROP TABLE #Pivot_Monthly_Extract
 			'New Referrals from Self referral','New Referrals from Other referral sources','New Referrals from Missing or Invalid sources') 
 			THEN [New referrals 2]
 			END AS Denominator -- bring through denominator for each category
-
-	INTO #Pivot_Monthly_Extract
 	
-	FROM #BaseMaster
+	INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster
 
 	UNPIVOT (MeasureValue FOR MeasureName IN 
-				([Caseload in IMD Quintile 1],
+				([Open Referrals in IMD Quintile 1],
+				[Open Referrals ethnicity- White British or Irish],
+				[Open Referrals ethnicity - Other White],
+				[Open Referrals ethnicity - Mixed],
+				[Open Referrals ethnicity - Asian or Asian British],
+				[Open Referrals ethnicity - Black or Black British],
+				[Open Referrals ethnicity - Other Ethnic Groups],
+				[Open Referrals ethnicity - Not stated],
+				[Open Referrals ethnicity - Missing],
+				[Open Referrals ethnicity - Not known],
+				[Open Referrals aged 16 to 20],
+				[Open Referrals aged 21 to 25],
+				[Open Referrals aged 26 to 39],
+				[Open Referrals aged 40 plus],
+				[Open Referrals total],
+				[New referrals],
+				[Closed referrals],
+				[Open Referrals referred from GP],
+				[Open Referrals referred from Other primary care],
+				[Open Referrals referred from Primary care health visitor],
+				[Open Referrals referred from Primary care Maternity service],
+				[Open Referrals referred from Secondary care],
+				[Open Referrals referred from Self referral],
+				[Open Referrals referred from Other referral sources],
+				[Open Referrals referred from Missing or Invalid sources],
+				[New Referrals from GP],
+				[New Referrals from Other primary care],
+				[New Referrals from Primary care health visitor],
+				[New Referrals from Primary care Maternity service],
+				[New Referrals from Secondary care],
+				[New Referrals from Self referral],
+				[New Referrals from Other referral sources],
+				[New Referrals from Missing or Invalid sources],
+				[Caseload total],
+				[Caseload in IMD Quintile 1],
 				[Caseload ethnicity- White British or Irish],
 				[Caseload ethnicity - Other White],
 				[Caseload ethnicity - Mixed],
@@ -530,13 +753,11 @@ DROP TABLE #Pivot_Monthly_Extract
 				[Caseload ethnicity - Other Ethnic Groups],
 				[Caseload ethnicity - Not stated],
 				[Caseload ethnicity - Missing],
+				[Caseload ethnicity - Not known],
 				[Caseload aged 16 to 20],
 				[Caseload aged 21 to 25],
 				[Caseload aged 26 to 39],
 				[Caseload aged 40 plus],
-				[Caseload total],
-				[New referrals],
-				[Closed referrals],
 				[Caseload referred from GP],
 				[Caseload referred from Other primary care],
 				[Caseload referred from Primary care health visitor],
@@ -544,19 +765,8 @@ DROP TABLE #Pivot_Monthly_Extract
 				[Caseload referred from Secondary care],
 				[Caseload referred from Self referral],
 				[Caseload referred from Other referral sources],
-				[Caseload referred from Missing or Invalid sources],
-				[New Referrals from GP],
-				[New Referrals from Other primary care],
-				[New Referrals from Primary care health visitor],
-				[New Referrals from Primary care Maternity service],
-				[New Referrals from Secondary care],
-				[New Referrals from Self referral],
-				[New Referrals from Other referral sources],
-				[New Referrals from Missing or Invalid sources])) U
-
-
-
-
+				[Caseload referred from Missing or Invalid sources])) U
+		
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -570,10 +780,11 @@ ACCESS EXTRACT
 CALCULATES MONTHLY YEAR TO DATE ACCESS AT PROVIDER TO ENGLAND LEVELS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#YTD') IS NOT NULL
-DROP TABLE #YTD
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_YTD') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_YTD
 
----- Provider Year to Date access 
+
+-- Provider Year to Date access 
 SELECT DISTINCT
 	b.SubmissionType,
 	b.ReportingPeriodEndDate,
@@ -585,9 +796,9 @@ SELECT DISTINCT
 	SUM(ISNULL(b.InMonthAccess,0)) OVER (PARTITION BY b.OrgIDProv, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
 	b.[Provider region name] AS [Geographic benchmarking group]
 	 
-INTO #YTD
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_YTD
 
-FROM #BaseMaster AS b
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster AS b
 
 WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
@@ -595,7 +806,7 @@ WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 UNION ALL
 
 
------ CCG Year to Date access
+--- CCG Year to Date access
 SELECT DISTINCT
 	b.SubmissionType,
 	b.ReportingPeriodEndDate,
@@ -607,7 +818,7 @@ SELECT DISTINCT
 	SUM(ISNULL(b.InMonthAccessCCG,0)) OVER (PARTITION BY b.OrgIDCCGRes, b.Der_FY ORDER BY B.UniqMonthID) AS [YTD Access],
 	b.[Region name] AS [Geographic benchmarking group]
 
-FROM #BaseMaster AS b
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster AS b
 
 WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
@@ -615,7 +826,7 @@ WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 UNION ALL
 
 
------ STP Year to Date access
+--- STP Year to Date access
 SELECT DISTINCT
 	b.SubmissionType,
 	b.ReportingPeriodEndDate,
@@ -627,7 +838,7 @@ SELECT DISTINCT
     SUM(ISNULL(b.InMonthAccessSTP,0)) OVER (PARTITION BY b.STP_Code, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
 	b.[Region name] AS [Geographic benchmarking group]
 
-FROM #BaseMaster AS b
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster AS b
 
 LEFT JOIN NHSE_Reference.dbo.[tbl_Ref_ODS_Commissioner_Hierarchies] map ON b.OrgIDCCGRes = map.Organisation_Code
 
@@ -636,7 +847,7 @@ WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
 UNION ALL
 
------ Region Year to Date access
+--- Region Year to Date access
 SELECT DISTINCT
 	b.SubmissionType,
 	b.ReportingPeriodEndDate,
@@ -649,7 +860,7 @@ SELECT DISTINCT
 	'N/A' AS [Geographic benchmarking group]
 
 
-FROM #BaseMaster AS b
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster AS b
 
 WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 
@@ -657,7 +868,7 @@ WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
 UNION ALL
 
 
------ England Year to Date access
+--- England Year to Date access
 SELECT DISTINCT
 	m.SubmissionType,
 	d.ReportingPeriodEndDate,
@@ -669,7 +880,7 @@ SELECT DISTINCT
 	SUM(ISNULL(m.InMonthAccessEng,0)) OVER (PARTITION BY m.Der_FY ORDER BY m.UniqMonthID) AS [YTD Access],
 	'N/A' AS [Geographic benchmarking group]
 
-FROM #Master m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Master m
 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] AS d ON m.UniqMonthID = d.UniqMonthID
 
@@ -681,8 +892,9 @@ WHERE m.UniqMonthID BETWEEN @StartRP and @EndRP
 BRINGS THROUGH FYFV/LTP TARGETS MAPPED TO CURRENT ORGANISATIONAL BOUNDARIES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Targets') IS NOT NULL
-DROP TABLE #Targets
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Targets') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Targets
+
 
 -- CCG targets mapped to latest boundaries
 SELECT DISTINCT	
@@ -691,7 +903,7 @@ SELECT DISTINCT
 	COALESCE(cc.New_Code,t.Organisation_Code) AS OrganisationCode,
 	SUM([Target]) AS Targets
 
-INTO #Targets
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Targets
 
 FROM [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalTargets_Totals] t
 
@@ -700,6 +912,8 @@ LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON t.Organisa
 WHERE t.Organisation_Type = 'CCG' 
 
 GROUP BY t.FYear, t.Organisation_Type, COALESCE(cc.New_Code,t.Organisation_Code)
+
+
 
 
 UNION ALL
@@ -758,8 +972,9 @@ GROUP BY t.FYear, t.Organisation_Type
 DUPLICATE RECORDS ACROSS NEXT 11 MONTHS TO CALCULATE ROLIING 12 MONTH DATA - FOR CALCULATING ROLLING ACCESS PRIOR TO PUBLICATION OF NHS DIGITAL FIGURES (MARCH 2021 DATA)
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Rolling') IS NOT NULL
-DROP TABLE #Rolling
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Rolling') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling
+
 
 SELECT
 	   m.UniqMonthID + (ROW_NUMBER() OVER(PARTITION BY m.UniqServReqID, m.UniqMonthID ORDER BY m.UniqMonthID ASC) -1) AS Der_MonthID,
@@ -772,9 +987,9 @@ SELECT
        m.Region_Code,
        m.AttendedContact AS RollingAccess
 
-INTO #Rolling
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling
 
-FROM #master m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master m
 
 CROSS JOIN MASTER..spt_values AS n WHERE n.type = 'p' AND n.number BETWEEN m.UniqMonthID AND m.UniqMonthID + 11
 
@@ -783,17 +998,21 @@ CROSS JOIN MASTER..spt_values AS n WHERE n.type = 'p' AND n.number BETWEEN m.Uni
 GET PUBLISHED ROLLING ACCESS DATA FROM NHS DIGITAL - MARCH 2021 ONWARDS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Pub') IS NOT NULL
-DROP TABLE #Pub
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Pub') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub
 
 SELECT
 	s.REPORTING_PERIOD_END AS ReportingPeriodEnd,
-	CASE WHEN BREAKDOWN = 'CCG - Residence' THEN 'CCG of Residence' ELSE BREAKDOWN END AS OrgType,
+	CASE 
+		WHEN BREAKDOWN IN('CCG - Residence','Sub ICB of Residence') THEN 'CCG of Residence' 
+		WHEN BREAKDOWN = 'ICB' THEN 'STP'
+		WHEN BREAKDOWN ='Commissioning Region' THEN 'Region'
+	ELSE BREAKDOWN END AS OrgType,
 	CASE WHEN BREAKDOWN = 'England' THEN 'ENG' 
 	ELSE s.PRIMARY_LEVEL END AS [Organisation code],
 	s.MEASURE_VALUE
 
-INTO #Pub
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub
 
 FROM NHSE_Sandbox_MentalHealth.dbo.Staging_UnsuppressedMHSDSPublicationFiles s
 
@@ -803,10 +1022,10 @@ WHERE MEASURE_ID = 'MHS91'
 BRINGS THROUGH ROLLING AND CALCULATED IN MONTH ACCESS TOTALS AT PROVIDER TO ENGLAND LEVELS, AND BRINGS THROUGH ONS 2016 BIRTHS FOR USE AS DENOMINATOR IN ACCESS RATE CALCULATION
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#AccessTotals') IS NOT NULL
-DROP TABLE #AccessTotals
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_AccessTotals') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AccessTotals
 
----- Provider level access, mapped to ONS E-codes for Tableau map
+-- Provider level access, mapped to ONS E-codes for Tableau map
 SELECT DISTINCT
 	m.ReportingPeriodEndDate,
 	m.SubmissionType,
@@ -831,21 +1050,21 @@ SELECT DISTINCT
 	NULL AS [Live births 2016 2], --duplicate for denominator in tableau
 	m.[Provider region name] AS [Geographic benchmarking group]
 
-INTO #AccessTotals
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AccessTotals
 
-FROM #BaseMaster m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster m
 
-----Rolling 12 month access counts from NHS Digital
-LEFT JOIN #Pub AS p ON m.OrgIDProv = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Provider'
+--Rolling 12 month access counts from NHS Digital
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub AS p ON m.OrgIDProv = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Provider'
 
-------Rolling 12 month access count calculation
+----Rolling 12 month access count calculation
 LEFT JOIN 
 	(SELECT 
 		Der_MonthID,
 		OrgIDProv,
 		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
 		COUNT(DISTINCT m1.Person_ID) AS People	
-	FROM #Rolling AS m1
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling AS m1
 	GROUP BY Der_MonthID, OrgIDProv) m1 
 	ON m.OrgIDProv = m1.OrgIDProv AND m.UniqMonthID = m1.Der_MonthID 
 
@@ -856,7 +1075,7 @@ LEFT JOIN
 		UniqMonthID,
 		OrgIDProv,
 		COUNT(DISTINCT CASE WHEN m2.InMonthAccess = 1 THEN m2.Person_ID END) AS InMonthAccess
-	FROM #master AS m2
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master AS m2
 	GROUP BY UniqMonthID, OrgIDProv) m2 
 	ON m.OrgIDProv = m2.OrgIDProv AND m.UniqMonthID = m2.UniqMonthID 
 
@@ -866,7 +1085,7 @@ LEFT JOIN NHSE_Reference.dbo.[tbl_Ref_ODS_Provider_Hierarchies] prov ON m.OrgIDP
 UNION ALL
 
 
----- CCG level acces and ONS births 
+-- CCG level acces and ONS births 
 SELECT DISTINCT
 	m.ReportingPeriodEndDate,
 	m.SubmissionType,
@@ -883,19 +1102,19 @@ SELECT DISTINCT
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
 	m.[Region name] AS [Geographic benchmarking group]
 
-FROM #BaseMaster m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster m
 
-----Rolling 12 month access counts from NHS Digital
-LEFT JOIN #Pub AS p ON m.OrgIDCCGRes = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'CCG of Residence'	
+--Rolling 12 month access counts from NHS Digital
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub AS p ON m.OrgIDCCGRes = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'CCG of Residence'	
 
-------Rolling 12 month access count calculation
+----Rolling 12 month access count calculation
 LEFT JOIN 
 	(SELECT 
 		Der_MonthID,
 		OrgIDCCGRes,
 		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
 		COUNT(DISTINCT m1.Person_ID) AS People	
-	FROM #Rolling AS m1
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling AS m1
 	GROUP BY Der_MonthID, OrgIDCCGRes) m1 
 
 	ON m.OrgIDCCGRes = m1.OrgIDCCGRes AND m.UniqMonthID = m1.Der_MonthID 
@@ -906,7 +1125,7 @@ LEFT JOIN
 		UniqMonthID,
 		OrgIDCCGRes,
 		COUNT(DISTINCT CASE WHEN m2.InMonthAccessCCG = 1 THEN m2.Person_ID END) AS InMonthAccess
-	FROM #master AS m2
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master AS m2
 	GROUP BY UniqMonthID, OrgIDCCGRes) m2 
 
 	ON m.OrgIDCCGRes = m2.OrgIDCCGRes AND m.UniqMonthID = m2.UniqMonthID 
@@ -919,7 +1138,7 @@ LEFT JOIN
 		COALESCE(cc.New_Code,o.OrgCode) AS OrganisationCode,
 		SUM(o.LiveBirths2016) AS [Live births 2016]
 
-	FROM #AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
 
 	LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON o.OrgCode = cc.Org_Code
 
@@ -933,7 +1152,7 @@ LEFT JOIN
 UNION ALL
 
 
----- STP level access and ONS births
+-- STP level access and ONS births
 SELECT DISTINCT
 	m.ReportingPeriodEndDate,
 	m.SubmissionType,
@@ -950,19 +1169,19 @@ SELECT DISTINCT
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
 	m.[Region name] AS [Geographic benchmarking group]
 
-FROM #BaseMaster m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster m
 
-----Rolling 12 month access counts from NHS Digital
-LEFT JOIN #Pub AS p ON m.STP_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'STP'
+--Rolling 12 month access counts from NHS Digital
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub AS p ON m.STP_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'STP'
 
------- Rolling 12 month access count calculation
+---- Rolling 12 month access count calculation
 LEFT JOIN 
 	(SELECT 
 		Der_MonthID,
 		STP_Code,
 		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
 		COUNT(DISTINCT m1.Person_ID) AS People
-	FROM #Rolling AS m1
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling AS m1
 	GROUP BY Der_MonthID, STP_Code) m1 
 
 	ON m.STP_Code = m1.STP_Code AND m.UniqMonthID = m1.Der_MonthID 	
@@ -973,7 +1192,7 @@ LEFT JOIN
 		UniqMonthID,
 		STP_Code,
 		COUNT(DISTINCT CASE WHEN m2.InMonthAccessSTP = 1 THEN m2.Person_ID END) AS InMonthAccess
-	FROM #master AS m2
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master AS m2
 	GROUP BY UniqMonthID, STP_Code) m2 
 
 	ON m.STP_Code = m2.STP_Code AND m.UniqMonthID = m2.UniqMonthID 
@@ -986,7 +1205,7 @@ LEFT JOIN
 		map.STP_Code AS OrganisationCode,
 		SUM(o.LiveBirths2016) AS [Live births 2016]
 
-	FROM #AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
 
 	LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON o.OrgCode = cc.Org_Code
 
@@ -1000,7 +1219,7 @@ LEFT JOIN
 UNION ALL
 
 
----- Region level access and ONS births
+-- Region level access and ONS births
 SELECT DISTINCT
 	m.ReportingPeriodEndDate,
 	m.SubmissionType,
@@ -1017,19 +1236,19 @@ SELECT DISTINCT
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
 	'N/A' AS [Geographic benchmarking group]
 
-FROM #BaseMaster m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster m
 
-----Rolling 12 month access counts from NHS Digital
-LEFT JOIN #Pub AS p ON m.Region_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Region'
+--Rolling 12 month access counts from NHS Digital
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub AS p ON m.Region_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Region'
 
------- Rolling 12 month access count calculation
+---- Rolling 12 month access count calculation
 LEFT JOIN 
 	(SELECT 
 		Der_MonthID,
 		Region_Code, 
 		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
 		COUNT(DISTINCT m1.Person_ID) AS People	
-		FROM #Rolling AS m1
+		FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling AS m1
 	GROUP BY Der_MonthID, Region_Code) m1 
 
 	ON m.Region_Code = m1.Region_Code AND m.UniqMonthID = m1.Der_MonthID 
@@ -1040,7 +1259,7 @@ LEFT JOIN
 		UniqMonthID,
 		Region_Code,
 		COUNT(DISTINCT CASE WHEN m2.InMonthAccessReg = 1 THEN m2.Person_ID END) AS InMonthAccess
-		FROM #master AS m2
+		FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master AS m2
 	GROUP BY UniqMonthID, Region_Code) m2 
 
 	ON m.Region_Code = m2.Region_Code AND m.UniqMonthID = m2.UniqMonthID 
@@ -1053,7 +1272,7 @@ LEFT JOIN
 		map.Region_Code AS OrganisationCode,
 		SUM(o.LiveBirths2016) AS [Live births 2016]
 
-	FROM #AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
 
 	LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON o.OrgCode = cc.Org_Code
 
@@ -1069,7 +1288,7 @@ LEFT JOIN
 UNION ALL
 
 
----- England level access and ONS births
+-- England level access and ONS births
 SELECT DISTINCT
 	m.ReportingPeriodEndDate,
 	m.SubmissionType,
@@ -1086,18 +1305,18 @@ SELECT DISTINCT
 	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
 	'N/A' AS [Geographic benchmarking group]
 
-FROM #Base m
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Base m
 
 -- Rolling 12 month access counts from NHS Digital
-LEFT JOIN #Pub AS p ON m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'England'
+LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub AS p ON m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'England'
 
----- Rolling 12 month access count calculation
+-- Rolling 12 month access count calculation
 LEFT JOIN 
 	(SELECT 
 		Der_MonthID,
 		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
 		COUNT(DISTINCT m1.Person_ID) AS People
-	FROM #Rolling AS m1
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling AS m1
 	GROUP BY Der_MonthID) m1 
 
 	ON m.UniqMonthID = m1.Der_MonthID 
@@ -1107,7 +1326,7 @@ LEFT JOIN
 	(SELECT 
 		UniqMonthID,
 		COUNT(DISTINCT CASE WHEN m2.InMonthAccessEng = 1 THEN m2.Person_ID END) AS InMonthAccess
-	FROM #master AS m2
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_master AS m2
 	GROUP BY UniqMonthID) m2 
 
 	ON m.UniqMonthID = m2.UniqMonthID 
@@ -1121,7 +1340,7 @@ LEFT JOIN
 		'England' AS OrganisationName,
 		SUM(o.LiveBirths2016) AS [Live births 2016]
 
-	FROM #AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates d, [NHSE_Sandbox_MentalHealth].[dbo].[Staging_PerinatalONSBirths2016] o
 
 	WHERE o.OrgType = 'CCG'
 
@@ -1133,8 +1352,8 @@ LEFT JOIN
 DQ FLAGS UP TO LATEST PERFORMANCE DATA - FOR TABLEAU DQ MAP
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#ProviderDQ_Submissions_FYear') IS NOT NULL
-DROP TABLE #ProviderDQ_Submissions_FYear
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_ProviderDQ_Submissions_FYear') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ProviderDQ_Submissions_FYear
 
 SELECT DISTINCT 
 	@RPEndDatePerformance AS ReportingPeriodEndDate,
@@ -1162,8 +1381,8 @@ SELECT DISTINCT
 		WHEN a.UniqMonthID = @LatestPerformanceSub AND a.InMonthAccess BETWEEN 1 AND 5 THEN 1 
 		ELSE 0 END) AS [Latest performance Suppressed submission flag] -- Flags missed submissions in latest Performance data
 
-INTO #ProviderDQ_Submissions_FYear
-FROM #AccessTotals a
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ProviderDQ_Submissions_FYear
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AccessTotals a
 
 LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header] AS d ON a.UniqMonthID = d.UniqMonthID
 
@@ -1181,8 +1400,9 @@ GROUP BY
 UNPIVOT ACCESS COUNTS FOR DASHBOARD EXTRACT
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Pivot_Access') IS NOT NULL
-DROP TABLE #Pivot_Access
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Pivot_Access') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access
+
 
 --Unpivot the Access measures
 SELECT DISTINCT
@@ -1199,9 +1419,9 @@ SELECT DISTINCT
 	CASE WHEN MeasureName IN ('Access', 'AccessRolling') THEN [Live births 2016 2] ELSE NULL END AS [Denominator],
 	[Geographic benchmarking group]
 	
-INTO #Pivot_Access 
+INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access 
 
-FROM #AccessTotals 
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AccessTotals 
 
 UNPIVOT 
 	(MeasureValue FOR MeasureName IN 
@@ -1227,7 +1447,7 @@ SELECT DISTINCT
 	NULL AS [Denominator],
 	[Geographic benchmarking group]
 
-FROM #YTD
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_YTD
 
 UNPIVOT 
 	(MeasureValue FOR MeasureName IN 
@@ -1252,7 +1472,7 @@ SELECT DISTINCT
 	NULL AS [Denominator],
 	NULL AS [Geographic benchmarking group]
 
-FROM #ProviderDQ_Submissions_FYear
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ProviderDQ_Submissions_FYear
 
 UNPIVOT 
 	(MeasureValue FOR MeasureName IN 
@@ -1265,7 +1485,7 @@ UNPIVOT
 UNION ALL
 
 
---Sum up Caseload measures to organisation level for inclusion in the Data table - Provider
+--Sum up Open Referrals measures to organisation level for inclusion in the Data table - Provider
 SELECT
 	ReportingPeriodEndDate,
 	SubmissionType,
@@ -1280,9 +1500,9 @@ SELECT
 	NULL AS [Denominator],
 	[Provider region name] AS [Geographic benchmarking group]
 
-	FROM #Pivot_Monthly_Extract
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
 	
-	WHERE MeasureName IN ('Caseload total','New referrals','Closed referrals')
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
 
 	GROUP BY ReportingPeriodEndDate,
 	SubmissionType,
@@ -1297,7 +1517,7 @@ SELECT
 UNION ALL
 
 
---Sum up Caseload to organisation level for inclusion in the Data table - CCG
+--Sum up Open Referrals to organisation level for inclusion in the Data table - CCG
 SELECT
 	ReportingPeriodEndDate,
 	SubmissionType,
@@ -1312,9 +1532,9 @@ SELECT
 	NULL AS [Denominator],
 	[Region name] AS [Geographic benchmarking group]
 
-	FROM #Pivot_Monthly_Extract
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
 	
-	WHERE MeasureName IN ('Caseload total','New referrals','Closed referrals')
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
 
 	GROUP BY ReportingPeriodEndDate,
 	SubmissionType,
@@ -1329,7 +1549,7 @@ SELECT
 UNION ALL
 
 
---Sum up Caseload to organisation level for inclusion in the Data table - STP
+--Sum up Open Referrals to organisation level for inclusion in the Data table - STP
 SELECT
 	ReportingPeriodEndDate,
 	SubmissionType,
@@ -1344,9 +1564,9 @@ SELECT
 	NULL AS [Denominator],
 	[Region name] AS [Geographic benchmarking group]
 
-	FROM #Pivot_Monthly_Extract
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
 	
-	WHERE MeasureName IN ('Caseload total','New referrals','Closed referrals')
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
 
 	GROUP BY ReportingPeriodEndDate,
 	SubmissionType,
@@ -1361,7 +1581,7 @@ SELECT
 UNION ALL
 
 
---Sum up Caseload to organisation level for inclusion in the Data table - Region
+--Sum up Open Referrals to organisation level for inclusion in the Data table - Region
 SELECT
 	ReportingPeriodEndDate,
 	SubmissionType,
@@ -1376,9 +1596,9 @@ SELECT
 	NULL AS [Denominator],
 	'N/A' AS [Geographic benchmarking group]
 
-	FROM #Pivot_Monthly_Extract
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
 	
-	WHERE MeasureName IN ('Caseload total','New referrals','Closed referrals')
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
 
 	GROUP BY ReportingPeriodEndDate,
 	SubmissionType,
@@ -1392,7 +1612,7 @@ SELECT
 UNION ALL
 
 
---Sum up Caseload to organisation level for inclusion in the Data table - England
+--Sum up Open Referrals to organisation level for inclusion in the Data table - England
 SELECT
 	ReportingPeriodEndDate,
 	SubmissionType,
@@ -1407,9 +1627,9 @@ SELECT
 	NULL AS [Denominator],
 	'N/A' AS [Geographic benchmarking group]
 
-	FROM #Pivot_Monthly_Extract
+	FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
 	
-	WHERE MeasureName IN ('Caseload total','New referrals','Closed referrals')
+	WHERE MeasureName IN ('Open Referrals total','New referrals','Closed referrals')
 
 	GROUP BY ReportingPeriodEndDate,
 	SubmissionType,
@@ -1421,8 +1641,9 @@ SELECT
 UNPIVOTED ACCESS EXTRACT WITH DQ FLAGS BROUGH THROUGH FOR USE IN TABLEAU MAP
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('tempdb..#Pivot_Access_Extract') IS NOT NULL
-DROP TABLE #Pivot_Access_Extract
+IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_Perinatal_Pivot_Access_Extract') IS NOT NULL
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access_Extract
+
 
 			SELECT DISTINCT
 			GETDATE() AS ImportDate,
@@ -1442,15 +1663,15 @@ DROP TABLE #Pivot_Access_Extract
 			d.[YTD Missed submission flag],
 			t.Targets
 			
-			INTO #Pivot_Access_Extract
+			INTO [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access_Extract
 			
-			FROM #Pivot_Access a
+			FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access a
 
-			LEFT JOIN #ProviderDQ_Submissions_FYear d ON a.OrganisationCode = d.OrganisationCode AND a.OrganisationType = 'Provider'
+			LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ProviderDQ_Submissions_FYear d ON a.OrganisationCode = d.OrganisationCode AND a.OrganisationType = 'Provider'
 
 			LEFT JOIN NHSE_Reference.dbo.[tbl_Ref_ODS_Provider_Hierarchies] prov ON a.OrganisationCode = prov.Organisation_Code AND a.OrganisationType = 'Provider'
 
-			LEFT JOIN #Targets t ON a.OrganisationType = t.OrganisationType AND a.OrganisationCode = t.OrganisationCode AND a.Der_FY = t.Fyear AND a.MeasureName ='YTD Access'
+			LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Targets t ON a.OrganisationType = t.OrganisationType AND a.OrganisationCode = t.OrganisationCode AND a.Der_FY = t.Fyear AND a.MeasureName ='YTD Access'
 
 			WHERE a.OrganisationCode != 'Missing / Invalid' AND a.OrganisationCode != 'RYK' -- Exclude DUDLEY INTEGRATED HEALTH AND CARE NHS TRUST (no longer submitting own PMH data) 
 
@@ -1465,11 +1686,38 @@ UPDATE ACCESS AND MONTHLY SANDBOX TABLES WITH DATA FOR THIS FINANCIAL YEAR
 
 DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Activity
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Activity
+
 SELECT * 
-FROM #Pivot_Monthly_Extract
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
+
 
 DELETE FROM NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Dashboard_Perinatal_Access
 SELECT * 
-FROM #Pivot_Access_Extract
+FROM [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access_Extract
 
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+DROP TEMP TABLES
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access_Extract
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Access
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_ProviderDQ_Submissions_FYear
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AccessTotals
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pub
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Rolling
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Targets
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_YTD
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Pivot_Monthly_Extract
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_BaseMaster
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Base
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllOrgs
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_AllDates
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Master
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_contYTD
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Conts
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_refs
+DROP TABLE [NHSE_Sandbox_MentalHealth].[dbo].Temp_Perinatal_Cumulative
