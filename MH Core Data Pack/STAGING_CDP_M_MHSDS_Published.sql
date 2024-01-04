@@ -887,8 +887,6 @@ SELECT
 
 WHERE latest.Is_Latest = 1 )_
 
---where org_code in ('R1L','8hr43','TAD')
-
 ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay, should be 15 measures as of 18/10/2023:
