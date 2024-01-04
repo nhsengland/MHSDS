@@ -1008,18 +1008,3 @@ ADDITIONAL STEP - KEEP COMMENTED OUT UNTIL NEEDED
 --	FROM NHSE_Sandbox_Policy.dbo.STAGING_CDP_M_MHSDS_Published) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
 --	DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_M_MHSDS_Published_Future_Months]
-
-  --select distinct cdp_measure_id from [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] where reporting_period >= '2023-04-01'
-  --order by 1
-  
-  --select distinct cdp_measure_id from [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] where reporting_period >= '2023-04-01'
-  --order by 1
-
-  --select distinct cdp_measure_id  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_M_MHSDS_Published]
-  --WHERE Reporting_Period >= '2023-07-01'
-
-  --select * from [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_M_MHSDS_Published]  
-  --WHERE Region_Name LIKE '%COmmissioning%'
-
-  --SELECT * FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_M_MHSDS_Published]  
-  --WHERE CDP_Measure_Name LIKE '%CYP ED%'
