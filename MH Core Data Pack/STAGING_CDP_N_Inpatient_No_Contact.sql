@@ -9,11 +9,17 @@ BACKGROUND INFO: no provider data, need to run extra months for rolling quarter 
 
 INPUT:			 
 			     NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients
+				 NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity
+				 NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
+				 NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges
 			     [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] 
 				 NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies
 				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
 				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
 				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
+				 NHSE_Reference.dbo.tbl_Ref_Other_Dates_Full
+				 NHSE_UKHF.Data_Dictionary.vw_Mental_Health_Admitted_Patient_Classification_SCD
 
 OUTPUT:			 [insert output tables]
 
