@@ -12,10 +12,10 @@ MEASURE DESCRIPTION(s):
 			     CDP_B02: Proportion of referrals that finished a course of treatment in the reporting period that waited 42 days or less for first treatment expressed as a percentage
 				 CDP_B03: The proportion of people who waited over 90 days between first and second treatment appointment (where the second treatment appointment occurred within the month) in the reporting period. 
 						  The primary purpose of this indicator is to measure the number of people who have waited more than 90 days between first and second appointments.  
-						  There should be no in treatment pathway waits (where the person has an early appointment but is then put on an ëinternalí waiting list before a full course of treatment starts). 
+						  There should be no in treatment pathway waits (where the person has an early appointment but is then put on an ‚Äòinternal‚Äô waiting list before a full course of treatment starts). 
 						  There should be appropriate measures taken to reduce the numbers of people who have waited over 90 days for a second appointment. 
 				 CDP_B04: The number of people who enter NHS funded treatment with IAPT Services in the reporting period (FirstTreatment)
-				 CDP_B05: The proportion of people who have attended at least two treatment contacts and are moving to recovery (defined as those who at initial assessment achieved "casenessî and at final session did not) in the reporting period. 
+				 CDP_B05: The proportion of people who have attended at least two treatment contacts and are moving to recovery (defined as those who at initial assessment achieved "caseness‚Äù and at final session did not) in the reporting period. 
 						  Column name in the IAPT quarterly report: Recovery Rate.
 				 
 BACKGROUND INFO: Data for September 20 onwards will be sourced in a seperate script as data will come from IAPT v2 tables
