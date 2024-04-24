@@ -246,7 +246,7 @@ LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON CO
 --Provider hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table. Using Submission Tracker where no information in ODS table
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on m.Org_Code = ps.Prov_original COLLATE database_default
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, m.Org_Code) = ph.Organisation_Code COLLATE database_default
-LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on m.Org_Code = st.Org_Code
+LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code, Reporting_Period FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on m.Org_Code = st.Org_Code and m.Reporting_Period=st.Reporting_Period
 	LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst1 ON st.ICB_Code = chst1.STP_Code -- GET ICB NAME FROM ODS FOR CONSISTENCY FOR MLP
 	LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst2 ON st.Region_Code = chst2.Region_Code -- GET REG NAME FROM ODS FOR CONSISTENCY FOR MPL
 
@@ -800,6 +800,7 @@ WHERE Region_Code LIKE 'REG%'
 DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_M_MHSDS_Published]
 where org_Code = 'UNKNOWN' OR (Org_Type = 'Provider' AND Org_Code = '36L')
 
+           
 -- QA Check for duplicate rows, this should return a blank table if none
 SELECT Distinct 
 	   Reporting_Period,
@@ -819,6 +820,7 @@ SELECT Distinct
 	   Org_Code
 	   HAVING count(1) > 1
        ) a
+	 
 
 -- Check for differences between new month and previous month data (nb this will look high for the YTD measures when April data comes in)
 
@@ -888,6 +890,13 @@ SELECT
 WHERE latest.Is_Latest = 1 )_
 
 ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
+
+--check dates of each metric match what is expected
+SELECT DISTINCT CDP_MEASURE_ID, Reporting_Period
+  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_M_MHSDS_Published]  
+ WHERE Measure_Value IS NOT NULL -- needed once future trajectories/plans are added
+   AND Reporting_Period >= @RPEnd
+ORDER BY 1 ASC
 
 --check table has updated okay, should be 15 measures as of 18/10/2023:
 SELECT COUNT(DISTINCT cdp_measure_id)
