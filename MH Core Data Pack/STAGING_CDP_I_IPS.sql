@@ -83,7 +83,7 @@ SELECT
 	   'MHSDS IPS' as CDP_Measure_Name,
 	   'Provider' as Org_Type,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default) as Org_Code,
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name) as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName) as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code) as ICB_Code,
 	   COALESCE(ph.STP_Name,chst1.STP_Code) as ICB_Name,
 	   COALESCE(ph.Region_Code, st.Region_Code) AS Region_Code,
@@ -93,12 +93,12 @@ SELECT
 
   INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs]
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
+ FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
 
 --Provider hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on s.OrgIDProv = ps.Prov_original COLLATE database_default
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, s.OrgIDProv) = ph.Organisation_Code COLLATE database_default
-LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on s.OrgIDProv = st.Org_Code
+LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code, Reporting_Period FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on s.OrgIDProv = st.Org_Code and s.ReportingPeriodEnd=st.Reporting_Period
 	LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst1 ON st.ICB_Code = chst1.STP_Code -- GET ICB NAME FROM ODS FOR CONSISTENCY FOR MLP
 	LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst2 ON st.Region_Code = chst2.Region_Code -- GET REG NAME FROM ODS FOR CONSISTENCY FOR MPL
 
@@ -108,7 +108,7 @@ LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FR
 GROUP BY
 	   s.ReportingPeriodEnd,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default),
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name), --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName), --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code),
 	   COALESCE(ph.STP_Name,chst1.STP_Code),
 	   COALESCE(ph.Region_Code, st.Region_Code),
