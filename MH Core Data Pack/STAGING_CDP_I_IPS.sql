@@ -83,7 +83,7 @@ SELECT
 	   'MHSDS IPS' as CDP_Measure_Name,
 	   'Provider' as Org_Type,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default) as Org_Code,
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name) as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName) as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code) as ICB_Code,
 	   COALESCE(ph.STP_Name,chst1.STP_Code) as ICB_Name,
 	   COALESCE(ph.Region_Code, st.Region_Code) AS Region_Code,
@@ -108,7 +108,7 @@ LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FR
 GROUP BY
 	   s.ReportingPeriodEnd,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default),
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name), --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName), --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code),
 	   COALESCE(ph.STP_Name,chst1.STP_Code),
 	   COALESCE(ph.Region_Code, st.Region_Code),
