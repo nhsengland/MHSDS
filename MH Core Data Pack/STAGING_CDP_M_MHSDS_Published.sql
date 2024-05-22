@@ -246,7 +246,7 @@ LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON CO
 --Provider hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table. Using Submission Tracker where no information in ODS table
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on m.Org_Code = ps.Prov_original COLLATE database_default
 LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, m.Org_Code) = ph.Organisation_Code COLLATE database_default
-LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on m.Org_Code = st.Org_Code
+LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code, Reporting_Period FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on m.Org_Code = st.Org_Code and m.Reporting_Period=st.Reporting_Period
 	LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst1 ON st.ICB_Code = chst1.STP_Code -- GET ICB NAME FROM ODS FOR CONSISTENCY FOR MLP
 	LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst2 ON st.Region_Code = chst2.Region_Code -- GET REG NAME FROM ODS FOR CONSISTENCY FOR MPL
 
