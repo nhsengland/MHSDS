@@ -1,0 +1,484 @@
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PRE-PROCESSED BUILD - PreProc_Assessment
+
+ASSET: MESH_MHSDS TABLES
+PART 1: EXTRACT OF ASSESSMENTS FROM THE 606 AND 607 TABLES
+
+This code extracts assessments that have been submitted in the 606/607 tables, and populates the Pre-Processed Assessments table with these for all historic data (run in 12 month batches).
+In Part 2, a separate version of this code gets run again for all historic months - but looking at assessments submitted in the 801/802 table only.
+Due to this ordered running, and the logic used in the Temp_PreProc_Ass2 table to prevent the insertion of duplicate assessments, this means that any assessments that are submitted across both the 606/607 and 801/802 tables will be taken from the 606/607 tables.
+This is what we want to happen, as assessments in the 801/802 tables are not linked to a specific contact / referral - so can be less timely (i.e. may not have taken place in the month that they were submitted).
+
+NOTE - ENSURE THIS STORED PROCEDURE IS RUN BEFORE THE 801/802 STORED PROCEDURE
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+DECLARE @EndRP INT
+
+SET @EndRP = (SELECT UniqMonthID FROM MHDInternal.[PreProc_Header] WHERE Der_MostRecentFlag = 'P')
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - DROP EXISTING INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Drop Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DROP INDEXES
+
+DROP INDEX ix_Assessment ON MHDInternal.[PreProc_Assessments]
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Drop Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Delete Data Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DELETE DATA
+
+DELETE FROM MHDInternal.[PreProc_Assessments] WHERE NHSEUniqSubmissionID IN (SELECT NHSEUniqSubmissionID FROM MESH_MHSDS.MHSDS_SubmissionFlags WHERE Der_IsLatest = 'N')
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Delete Data End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - EXTRACT AND UNION ASSESSMENTS TAKEN FROM MHS606 AND MHS607
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+IF OBJECT_ID ('[MHDInternal].Temp_PreProc_Ass') IS NOT NULL
+DROP TABLE MHDInternal.Temp_PreProc_Ass
+
+SELECT
+	'CON' AS Der_AssTable,
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	a.[UniqSubmissionID],
+	a.[NHSEUniqSubmissionID],
+	a.[UniqMonthID],
+	a.[CodedAssToolType],
+	a.[PersScore],
+	c.CareContDate AS Der_AssToolCompDate,
+	a.[RecordNumber],
+	a.[MHS607UniqID] AS Der_AssUniqID,
+	a.[OrgIDProv],
+	a.[Der_Person_ID] AS Person_ID,
+	a.[UniqServReqID],
+	a.[AgeAssessToolCont] AS Der_AgeAssessTool,
+	a.[UniqCareContID],
+	a.[UniqCareActID]
+	
+INTO MHDInternal.Temp_PreProc_Ass
+
+FROM [MESH_MHSDS].[MHS607CodedScoreAssessmentAct] a 
+
+LEFT JOIN  [MESH_MHSDS].[MHS201CareContact] c ON a.RecordNumber = c.RecordNumber AND a.UniqServReqID = c.UniqServReqID AND a.UniqCareContID = c.UniqCareContID
+
+LEFT JOIN [MHDInternal].[PreProc_Header]  h ON a.UniqMonthID = h.UniqMonthID
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions f ON a.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID --- only latest data
+
+
+
+INSERT INTO MHDInternal.Temp_PreProc_Ass
+
+SELECT
+	'REF' AS Der_AssTable,
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	r.[UniqSubmissionID],
+	r.[NHSEUniqSubmissionID],
+	r.[UniqMonthID],
+	r.[CodedAssToolType],
+	r.[PersScore],
+
+	----THIS LOGIC WAS USED IN THE INITIAL BUILD OF DATA UP TO 1476 (Mar23). FROM 1477 AND ONWARDS, USED THE NEWLY DERIVED AssToolCompTimestampDatetimeOffset FIELD - BETTER ACCOUNTS FOR UTC / BST OFFSET ISSUES, SO AT TIMEZONE FUNCTION NO LONGER NEEDED
+	----	r.[AssToolCompTimestamp] AT TIME ZONE 'GMT Standard Time' AS Der_AssToolCompDate, --Timestamp field with function to shift DATETIMEOFFSET back by 1h for dates within British Summer Time
+	
+	r.AssToolCompTimestampDatetimeOffset AS Der_AssToolCompDate,
+	r.[RecordNumber],
+	r.[MHS606UniqID] AS Der_AssUniqID,
+	r.[OrgIDProv],
+	r.[Der_Person_ID] AS Person_ID,
+	r.[UniqServReqID],
+	r.AgeAssessToolReferCompDate AS Der_AgeAssessTool,
+	NULL AS [UniqCareContID],
+	NULL AS [UniqCareActID]
+
+FROM [MESH_MHSDS].[MHS606CodedScoreAssessmentRefer] r 
+
+LEFT JOIN [MHDInternal].[PreProc_Header]  h ON r.UniqMonthID = h.UniqMonthID
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions f ON r.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID --- only latest data
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Union End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - BUILD IN MONTH DERIVATIONS		
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+ INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments In Month Derivations Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+--START CODE
+
+IF OBJECT_ID ('[MHDInternal].Temp_PreProc_Ass2') IS NOT NULL
+DROP TABLE MHDInternal.Temp_PreProc_Ass2
+
+SELECT 
+	a.[ReportingPeriodStartDate],
+	a.[ReportingPeriodEndDate],
+	a.[Der_FY],
+	a.[UniqSubmissionID],
+	a.[NHSEUniqSubmissionID],
+	a.[Der_AssUniqID],
+	a.[Der_AssTable], 
+	a.[Person_ID],	
+	a.[UniqMonthID],	
+	a.[OrgIDProv],
+	a.[RecordNumber],	
+	a.[UniqServReqID],	
+	a.[UniqCareContID],	
+	a.[UniqCareActID],		
+	a.Der_AssToolCompDate,
+	a.[CodedAssToolType],
+	a.[PersScore],
+	a.Der_AgeAssessTool,
+	r.Category AS Der_AssessmentCategory,
+	r.[Assessment Tool Name] AS Der_AssessmentToolName,
+	r.[Preferred Term (SNOMED-CT)] AS Der_PreferredTermSNOMED,
+	r.[SNOMED Code Version] AS Der_SNOMEDCodeVersion,
+	r.[Lower Range] AS Der_LowerRange,
+	r.[Upper Range] AS Der_UpperRange,
+	CASE 
+		WHEN TRY_CONVERT(FLOAT,a.PersScore) BETWEEN r.[Lower Range] AND r.[Upper Range] THEN 'Y' 
+		ELSE NULL 
+	END AS Der_ValidScore, --Flags whether the person's assessment score was between the valid Lower and Upper range for that assessment, as recorded in the reference table 
+	CASE 
+		WHEN ROW_NUMBER () OVER (PARTITION BY 
+										a.Person_ID, 
+										a.Der_AssToolCompDate, 
+										ISNULL(a.UniqServReqID,0),
+										COALESCE(r.[Preferred Term (SNOMED-CT)],CAST(a.CodedAssToolType AS nvarchar)), --added in here
+										a.PersScore 
+										ORDER BY a.Der_AssUniqID ASC) = 1
+								THEN 'Y' 
+								ELSE NULL 
+		END AS Der_UniqAssessment, --Ranks combinations Person_ID, assessment date, referral ID (where known), Assessment name (where in ref table - else use raw SNOMED code) and Score to identify dupes - where there are dupes, one record will be flagged as Y.
+		--Change to previous script to look at tool name, rather than raw code - better accounts for SNOMED code changes over time. Where no name available, use code to avoid duplicate NULL named assessments being brought through.
+
+	CONCAT
+		(a.Der_AssToolCompDate,
+		a.UniqServReqID,
+		COALESCE(r.[Preferred Term (SNOMED-CT)],CAST(a.CodedAssToolType AS nvarchar)),
+		a.PersScore) AS Der_AssKey, 
+		--Creates a unique key of tool date, referral ID, Assessment name (where in ref table - else use raw SNOMED code) and Person score as a unique identifier for each assessment - used later to prevent insertion of duplicate, not-in-month assessments. 
+		--Change to previous script to look at tool name, rather than raw code - better accounts for SNOMED code changes over time. Where no name available, use code to avoid duplicate NULL named assessments being brought through.
+
+	CASE WHEN a.Der_AssToolCompDate BETWEEN a.ReportingPeriodStartDate AND a.ReportingPeriodEndDate THEN 1 ELSE 0 END AS Der_AssInMonth --Flags whether an assessment took place within the month or not (1 = in month)
+
+INTO MHDInternal.Temp_PreProc_Ass2
+
+FROM MHDInternal.Temp_PreProc_Ass a
+
+LEFT JOIN MHDInternal.[Reference_MH_Assessments] r ON a.CodedAssToolType = r.[Active Concept ID (SNOMED CT)] 
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments In Month Derivations End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - INSERT DATA INTO PRE-PROCESSED TABLE			
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+ INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+--Insertion of assessments that took place in the month that they were submitted in 
+
+INSERT INTO [MHDInternal].[PreProc_Assessments] 
+
+SELECT 
+	a.ReportingPeriodStartDate,
+	a.ReportingPeriodEndDate,
+	a.Der_FY,
+	a.UniqSubmissionID,
+	a.NHSEUniqSubmissionID,
+	a.UniqMonthID,
+	a.OrgIDProv,
+	a.Person_ID,
+	a.RecordNumber,
+	a.UniqServReqID,
+	a.UniqCareContID,
+	a.UniqCareActID,
+	a.CodedAssToolType,
+	a.PersScore,
+	a.Der_AssUniqID,
+	a.Der_AssTable,
+	a.Der_AssToolCompDate,
+	a.Der_AgeAssessTool,
+	a.Der_AssessmentToolName,
+	a.Der_PreferredTermSNOMED,
+	a.Der_SNOMEDCodeVersion,
+	a.Der_LowerRange,
+	a.Der_UpperRange,
+	a.Der_ValidScore,
+	a.Der_AssessmentCategory,
+	NULL AS Der_AssOrderAsc,
+	NULL AS Der_AssOrderDesc,
+	a.Der_AssKey
+
+FROM MHDInternal.Temp_PreProc_Ass2 a
+
+WHERE Der_UniqAssessment = 'Y' AND Der_AssInMonth = 1 --Where an assessment duplicated, only select one record (using Der_UniqAssessment); and insert only where the assessment took place in the month that it was submitted in
+
+
+--Insertion of assessments that did not take place in the month that they were submitted in 
+INSERT INTO [MHDInternal].[PreProc_Assessments] 
+
+SELECT 
+	a.ReportingPeriodStartDate,
+	a.ReportingPeriodEndDate,
+	a.Der_FY,
+	a.UniqSubmissionID,
+	a.NHSEUniqSubmissionID,
+	a.UniqMonthID,
+	a.OrgIDProv,
+	a.Person_ID,
+	a.RecordNumber,
+	a.UniqServReqID,
+	a.UniqCareContID,
+	a.UniqCareActID,
+	a.CodedAssToolType,
+	a.PersScore,
+	a.Der_AssUniqID,
+	a.Der_AssTable,
+	a.Der_AssToolCompDate,
+	a.Der_AgeAssessTool,
+	a.Der_AssessmentToolName,
+	a.Der_PreferredTermSNOMED,
+	a.Der_SNOMEDCodeVersion,
+	a.Der_LowerRange,
+	a.Der_UpperRange,
+	a.Der_ValidScore,
+	a.Der_AssessmentCategory,
+	NULL AS Der_AssOrderAsc,
+	NULL AS Der_AssOrderDesc,
+	a.Der_AssKey
+	
+FROM MHDInternal.Temp_PreProc_Ass2 a
+
+WHERE Der_UniqAssessment = 'Y' AND Der_AssInMonth = 0 AND a.Der_AssKey NOT IN (SELECT Der_AssKey FROM [MHDInternal].[PreProc_Assessments] ) --NOTE - Comment out the last filter on the existing table when running very first step to first populate the table!
+--Where an assessment duplicated, only select one record (using Der_UniqAssessment); and where the assessment did not take place in the month that it was submitted in, and has not already been inserted into the table in previous months
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Insert End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - BUILD GLOBAL DERIVATIONS					
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Global Derivations Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+--START CODE
+
+SELECT
+	a.Der_RecordID,
+	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_PreferredTermSNOMED ORDER BY a.Der_AssToolCompDate ASC) AS Der_AssOrderAsc, --First assessment
+	ROW_NUMBER () OVER (PARTITION BY a.Person_ID, a.UniqServReqID, a.Der_PreferredTermSNOMED ORDER BY a.Der_AssToolCompDate DESC) AS Der_AssOrderDesc -- Last assessment
+
+INTO [MHDInternal].Temp_PreProc_AssOrder
+
+FROM [MHDInternal].[PreProc_Assessments] a
+
+WHERE a.Der_ValidScore = 'Y'
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Global Derivations End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - UPDATE DERIVATIONS					
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+ INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Global Update Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+--START CODE
+
+UPDATE a
+
+SET 
+	a.Der_AssOrderAsc = t.Der_AssOrderAsc,
+	a.Der_AssOrderDesc = t.Der_AssOrderDesc
+
+FROM [MHDInternal].[PreProc_Assessments] a
+
+LEFT JOIN [MHDInternal].Temp_PreProc_AssOrder t ON t.Der_RecordID = a.Der_RecordID
+
+
+--LOG END
+
+ INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Global Update End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENT - RECREATE INDEXES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Create Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- CREATE INDEX
+CREATE INDEX ix_Assessment ON [MHDInternal].[PreProc_Assessments] ([UniqMonthID], [RecordNumber], [OrgIDProv], [Person_ID], [UniqServReqID])
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSESSMENTS - DROP TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Drop Tables Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+-- DROP TABLES
+DROP TABLE [MHDInternal].Temp_PreProc_Ass
+
+DROP TABLE [MHDInternal].Temp_PreProc_Ass2
+
+DROP TABLE [MHDInternal].Temp_PreProc_AssOrder
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Assessments Drop Tables End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+	END
