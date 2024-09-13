@@ -1,0 +1,304 @@
+MONTHLY PRE-PROCESSING: INTERVENTIONS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+DECLARE @EndRP INT
+
+SET @EndRP = (SELECT UniqMonthID FROM MHDInternal.[PreProc_Header] WHERE Der_MostRecentFlag = 'P')
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DROP EXISTING INDEXES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Drop Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- DROP INDEX
+
+DROP INDEX ix_Interventions ON MHDInternal.[PreProc_Interventions]
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Drop Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INTERVENTIONS - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Delete Data Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DELETE DATA
+
+DELETE FROM MHDInternal.[PreProc_Interventions] WHERE NHSEUniqSubmissionID IN (SELECT NHSEUniqSubmissionID FROM MESH_MHSDS.MHSDS_SubmissionFlags WHERE Der_IsLatest = 'N')
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Delete Data End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INTERVENTIONS - COMBINE DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Combine Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+IF OBJECT_ID ('[MHDInternal].Temp_PreProc_Int') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_PreProc_Int
+
+--Get direct activity
+SELECT
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	ca.[UniqSubmissionID],
+	ca.[NHSEUniqSubmissionID],
+	ca.[UniqMonthID],
+	ca.[OrgIDProv],
+	ca.[Der_Person_ID] AS Person_ID,
+	ca.[RecordNumber],
+	ca.[UniqServReqID],
+	ca.[UniqCareContID],
+	ca.[UniqCareActID],
+	ca.[FindSchemeInUse],
+	ca.[CodeFind],
+	NULL AS [ObsSchemeInUse],
+	ca.[CodeObs],
+	ca.[ObsValue],
+	ca.[UnitofMeasurement_UCUM] as UnitMeasure,
+	ca.[Procedure] as CodeProcAndProcStatus,
+	CAST('DIRECT' As varchar(10)) AS [Der_InterventionType],
+	ca.MHS202UniqID AS [Der_InterventionUniqID],
+	cc.CareContDate AS [Der_ContactDate],
+	ca.ClinContactDurOfCareAct AS [Der_InterventionDuration],
+	CASE
+		WHEN CHARINDEX(':',ca.[Procedure]) > 0
+		THEN LEFT(ca.[Procedure],CHARINDEX(':',ca.[Procedure])-1)
+		ELSE ca.[Procedure]
+	END AS Der_SNoMEDProcCode,
+	CASE
+		WHEN CHARINDEX('=',ca.[Procedure]) > 0
+		THEN RIGHT(ca.[Procedure],CHARINDEX('=',REVERSE(ca.[Procedure]))-1)
+		ELSE NULL
+	END AS Der_SNoMEDProcQual
+	
+INTO [MHDInternal].Temp_PreProc_Int
+
+FROM [MESH_MHSDS].[MHS202CareActivity_ALL] ca
+
+LEFT JOIN [MESH_MHSDS].[MHS201CareContact_ALL] cc ON ca.RecordNumber = cc.RecordNumber AND ca.UniqCareContID = cc.UniqCareContID
+
+LEFT JOIN MHDInternal.[PreProc_Header]  h ON h.UniqMonthID = ca.UniqMonthID 
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions n ON ca.NHSEUniqSubmissionID = n.NHSEUniqSubmissionID --get latest data only
+
+WHERE (ca.CodeFind IS NOT NULL OR ca.CodeObs IS NOT NULL OR ca.[Procedure] IS NOT NULL)
+
+
+---Indirect activity
+INSERT INTO [MHDInternal].Temp_PreProc_Int
+
+SELECT 
+	h.[ReportingPeriodStartDate],
+	h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	i.[UniqSubmissionID],
+	i.[NHSEUniqSubmissionID],
+	i.[UniqMonthID],
+	i.[OrgIDProv],
+	i.[Der_Person_ID] AS Person_ID,
+	i.[RecordNumber],
+	i.[UniqServReqID],
+	NULL AS [UniqCareContID],
+	NULL AS [UniqCareActID],
+	i.[FindSchemeInUse],
+	i.[CodeFind],
+	NULL AS [ObsSchemeInUse],
+	NULL AS [CodeObs],
+	NULL AS [ObsValue],
+	NULL AS [UnitMeasure],
+	i.[IndActProcedure] AS [CodeProcAndProcStatus], --new for v5
+	'INDIRECT' AS [Der_InterventionType],
+	i.MHS204UniqID AS [Der_InterventionUniqID],
+	i.IndirectActDate AS [Der_ContactDate],
+	i.DurationIndirectAct AS [Der_InterventionDuration],
+	CASE
+		WHEN CHARINDEX(':',i.IndActProcedure) > 0 --new for v5
+		THEN LEFT(i.IndActProcedure,CHARINDEX(':',i.IndActProcedure)-1) --new for v5
+		ELSE i.IndActProcedure --new for v5
+	END AS Der_SNoMEDProcCode,
+	CASE
+		WHEN CHARINDEX('=',i.[IndActProcedure]) > 0
+		THEN RIGHT(i.[IndActProcedure],CHARINDEX('=',REVERSE(i.[IndActProcedure]))-1)
+		ELSE NULL
+	END AS Der_SNoMEDProcQual
+
+FROM [MESH_MHSDS].MHS204IndirectActivity_ALL i
+
+LEFT JOIN MHDInternal.[PreProc_Header]  h ON h.UniqMonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions n ON i.NHSEUniqSubmissionID = n.NHSEUniqSubmissionID --get latest data only
+
+WHERE (i.CodeFind IS NOT NULL OR i.[IndActProcedure] IS NOT NULL)
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INTERVENTIONS - INSERT DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+
+INSERT INTO MHDInternal.[PreProc_Interventions]
+
+	SELECT
+	i.[ReportingPeriodStartDate],
+	i.[ReportingPeriodEndDate],
+	i.[Der_FY],
+	i.[UniqSubmissionID],
+	i.[NHSEUniqSubmissionID],
+	i.[UniqMonthID],
+	i.[OrgIDProv],
+	i.[Person_ID],
+	i.[RecordNumber],
+	i.[UniqServReqID],
+	i.[UniqCareContID],
+	i.[UniqCareActID],
+	i.[FindSchemeInUse],
+	i.[CodeFind],
+	i.[ObsSchemeInUse],
+	i.[CodeObs],
+	i.[ObsValue],
+	i.[UnitMeasure],
+	i.[CodeProcAndProcStatus],
+	i.[Der_InterventionType],
+	i.[Der_InterventionUniqID],
+	i.[Der_ContactDate],
+	i.[Der_InterventionDuration],
+	s2.Term AS Der_SNoMEDFindTerm,
+	CASE WHEN s2.Term IS NULL THEN NULL WHEN s2.Effective_To IS NULL OR s2.Effective_To > i.Der_ContactDate THEN 'Current' ELSE 'Retired' END AS Der_SNoMEDFindValidity,
+	s3.Term AS Der_SNoMEDObsTerm,
+	CASE WHEN s3.Term IS NULL THEN NULL WHEN s3.Effective_To IS NULL OR s3.Effective_To > i.Der_ContactDate THEN 'Current' ELSE 'Retired' END AS Der_SNoMEDObsValidity,
+	i.[Der_SNoMEDProcCode],
+	i.[Der_SNoMEDProcQual],
+	s1.Term AS Der_SNoMEDProcTerm,
+	CASE WHEN s1.Term IS NULL THEN NULL WHEN s1.Effective_To IS NULL OR s1.Effective_To > i.Der_ContactDate THEN 'Current' ELSE 'Retired' END AS Der_SNoMEDProcValidity
+
+FROM MHDInternal.Temp_PreProc_Int i
+
+LEFT JOIN  [UKHD_SNOMED].[Descriptions_SCD]  s1 ON i.Der_SNoMEDProcCode = CAST(s1.[Concept_ID] AS VARCHAR) AND s1.Type_ID = 900000000000003001 AND s1.Is_Latest = 1 AND s1.Active = 1
+
+LEFT JOIN  [UKHD_SNOMED].[Descriptions_SCD]  s2 ON i.CodeFind = CAST(s2.[Concept_ID] AS VARCHAR) AND s2.Type_ID = 900000000000003001 AND s2.Is_Latest = 1 AND s2.Active = 1
+
+LEFT JOIN  [UKHD_SNOMED].[Descriptions_SCD]  s3 ON i.CodeObs = CAST(s3.[Concept_ID] AS VARCHAR) AND s3.Type_ID = 900000000000003001 AND s3.Is_Latest = 1 AND s3.Active = 1
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Insert End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INTERVENTIONS - RECREATE INDEX
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Create Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+-- START CODE - CREATE INDEX
+
+CREATE INDEX ix_Interventions ON [MHDInternal].PreProc_Interventions ([UniqMonthID], [RecordNumber], [OrgIDProv], [Person_ID], [UniqServReqID])
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INTERVENTIONS - DROP TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Drop Tables Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- DROP TABLES
+DROP TABLE MHDInternal.Temp_PreProc_Int
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Interventions Drop Tables End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+	END
