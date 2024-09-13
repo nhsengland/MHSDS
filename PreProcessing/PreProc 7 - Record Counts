@@ -1,0 +1,92 @@
+DECLARE @EndRP INT
+DECLARE @ReportingPeriodEnd DATE
+
+SET @EndRP = (SELECT UniqMonthID
+FROM [MHDInternal].[PreProc_Header]
+WHERE Der_MostRecentFlag = 'Y')
+
+SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate FROM [MHDInternal].[PreProc_Header] WHERE UniqMonthID = @EndRP)
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+RECORD COUNTS - INSERT DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'PreProc Record Counts Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, CAST('PreProc_Activity'AS varchar(70)) AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Activity] 
+	GROUP BY UniqMonthID 
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, 'PreProc_Assessments' AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Assessments] 
+	GROUP BY UniqMonthID 
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, 'PreProc_Inpatients' AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Inpatients] 
+	GROUP BY UniqMonthID 
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, 'PreProc_Interventions' AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Interventions] 
+	GROUP BY UniqMonthID 
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, 'PreProc_Header' AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Header] 
+	GROUP BY UniqMonthID 
+
+INSERT INTO [MHDInternal].[PreProc_RecordCounts] 
+	SELECT GETDATE() AS Extract_date, 'PreProc_Referral' AS [TableName], @EndRP AS OrgIDProvider, UniqMonthID, 'PreProc' AS SubmissionType, COUNT (*) AS [RecordCount] 
+	FROM [MHDInternal].[PreProc_Referral] 
+	GROUP BY UniqMonthID 
+
+--LOG END
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'PreProc Record Counts Insert End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+RECORD COUNTS - RECREATE PK AND INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Record Counts Create Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - CREATE INDEXES
+
+CREATE INDEX ix_RecordCounts ON [MHDInternal].[PreProc_RecordCounts] ([UniqMonthID], [OrgIDProvider], [TableName], [SubmissionType])
+
+-- LOG END
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Record Counts Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+END
