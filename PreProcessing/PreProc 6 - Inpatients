@@ -1,0 +1,301 @@
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+STEP FIVE - INPATIENTS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+DECLARE @EndRP INT
+
+SET @EndRP = (SELECT UniqMonthID FROM MHDInternal.[PreProc_Header] WHERE Der_MostRecentFlag = 'P')
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - DROP EXISTING INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Drop Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DROP INDEXES
+
+DROP INDEX ix_Inpatient ON MHDInternal.[PreProc_Inpatients]
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Drop Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Delete Data Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DELETE DATA
+
+DELETE FROM MHDInternal.[PreProc_Inpatients] WHERE NHSEUniqSubmissionID IN (SELECT NHSEUniqSubmissionID FROM MESH_MHSDS.MHSDS_SubmissionFlags WHERE Der_IsLatest = 'N')
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Delete Data End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - JOIN MHS501, MHS502							
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+--START CODE
+
+INSERT INTO [MHDInternal].[PreProc_Inpatients]
+
+SELECT
+	-- core bits
+	he.[ReportingPeriodStartDate],
+	he.[ReportingPeriodEndDate],
+	he.[Der_FY],
+	h.[UniqSubmissionID],
+	h.[NHSEUniqSubmissionID],
+	h.[UniqMonthID],
+	h.[OrgIDProv],
+	h.[Der_Person_ID] AS Person_ID,
+	h.[RecordNumber],
+	-- hospital spell
+	h.[MHS501UniqID],
+	h.[UniqHospProvSpellID] AS [UniqHospProvSpellNum], 
+	h.[UniqServReqID],
+	h.[DecidedToAdmitDate],
+	h.[DecidedToAdmitTime], 
+	h.[StartDateHospProvSpell],
+	h.[StartTimeHospProvSpell],
+	h.[SourceAdmMHHospProvSpell] AS [SourceAdmCodeHospProvSpell],
+	h.[MethAdmMHHospProvSpell] AS [AdmMethCodeHospProvSpell], 
+	h.[EstimatedDischDateHospProvSpell],
+	h.[PlannedDischDateHospProvSpell],
+	h.[PlannedDestDisch] AS [PlannedDischDestCode],
+	h.[DischDateHospProvSpell],
+	h.[DischTimeHospProvSpell],
+	h.[MethOfDischMHHospProvSpell] AS [DischMethCodeHospProvSpell], 
+	h.[DestOfDischHospProvSpell] AS [DischDestCodeHospProvSpell], 
+	h.[PostcodeDistrictMainVisitor],
+	h.[PostcodeDistrictDischDest],
+	-- ward stays
+	w.[MHS502UniqID],
+	w.[UniqWardStayID],
+	w.[StartDateWardStay],
+	w.[StartTimeWardStay],
+	w.[EndDateMHTrialLeave],
+	w.[EndDateWardStay],
+	w.[EndTimeWardStay],
+	wd.[SiteIDOfWard] AS [SiteIDOfTreat], -- taken from MHS903 instead 
+	w.[WardType],
+	w.[WardAge],
+	w.WardIntendedSex AS [WardSexTypeCode], -- v6 name change
+	w.[WardIntendedClinCareMH] AS [IntendClinCareIntenCodeMH], -- v6 name change 
+	w.[WardSecLevel],
+	w.[LockedWardInd],
+	w.MHAdmittedPatientClass AS [HospitalBedTypeMH], -- v6 name change 
+	w.[SpecialisedMHServiceCode],
+	w.[WardCode],
+	w.[WardLocDistanceHome],
+	CASE WHEN h.DischDateHospProvSpell IS NOT NULL THEN 'CLOSED' ELSE 'OPEN' END AS Der_HospSpellStatus,
+	NULL AS Der_HospSpellRecordOrder,
+	NULL AS Der_FirstWardStayRecord,
+	NULL AS Der_LastWardStayRecord
+	
+FROM [MESH_MHSDS].[MHS501HospProvSpell] h
+
+LEFT JOIN [MESH_MHSDS].[MHS502WardStay_ALL] w ON w.UniqServReqID = h.UniqServReqID 
+	AND w.UniqHospProvSpellID = h.UniqHospProvSpellID 
+	AND w.RecordNumber = h.RecordNumber
+
+LEFT JOIN MHDInternal.PreProc_Header he ON h.UniqMonthID = he.UniqMonthID
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions n ON h.NHSEUniqSubmissionID = n.NHSEUniqSubmissionID 
+
+LEFT JOIN [MESH_MHSDS].MHS903WardDetails wd ON w.UniqWardCode = wd.UniqWardCode AND w.NHSEUniqSubmissionID = wd.NHSEUniqSubmissionID AND w.UniqMonthID = wd.UniqMonthID
+
+
+ --LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Insert End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - BUILD DERIVATIONS	
+(Run once at the end of historic table build)
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+
+ --LOG START
+
+ INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Derivations Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+--START CODE
+IF OBJECT_ID ('[MHDInternal].Temp_PreProc_Inpat') IS NOT NULL
+DROP TABLE MHDInternal.Temp_PreProc_Inpat
+
+SELECT
+	i.Der_RecordID,
+	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID DESC) AS Der_HospSpellRecordOrder, 
+	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID DESC, i.EndDateWardStay DESC, i.MHS502UniqID DESC) AS Der_LastWardStayRecord,
+	ROW_NUMBER () OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSpellNum ORDER BY i.UniqMonthID ASC, i.EndDateWardStay ASC, i.MHS502UniqID ASC) AS Der_FirstWardStayRecord
+
+INTO MHDInternal.Temp_PreProc_Inpat
+
+FROM MHDInternal.[PreProc_Inpatients] i
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Derivations End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - UPDATE DERIVATIONS		
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+--LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Update Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE
+UPDATE i
+
+SET 
+	i.Der_HospSpellRecordOrder = t.Der_HospSpellRecordOrder,
+	i.Der_FirstWardStayRecord = t.Der_FirstWardStayRecord,
+	i.Der_LastWardStayRecord = t.Der_LastWardStayRecord
+
+FROM MHDInternal.[PreProc_Inpatients] i
+
+INNER JOIN MHDInternal.Temp_PreProc_Inpat t ON t.Der_RecordID = i.Der_RecordID
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Update End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - RECREATE INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Create Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+-- START CODE
+
+CREATE INDEX ix_Inpatient ON MHDInternal.[PreProc_Inpatients]([UniqMonthID], [RecordNumber], [OrgIDProv], [Person_ID], [UniqServReqID])
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+INPATIENTS - DROP TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+-- LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Drop Tables Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- DROP TABLES
+
+DROP TABLE MHDInternal.Temp_PreProc_Inpat
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Inpatients Drop Tables End' AS Step,
+	GETDATE() AS [TimeStamp]
+
