@@ -1,0 +1,36 @@
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+PRE-PROC STEP 0 - CHECK
+CREATED BY LOUISE SHUTTLEWORTH 22/04/2024
+
+CODE TO CHECK WHEN EACH MHSDS TABLE WAS LAST UPDATED IN THE MART 
+
+Outputs a single row per MHSDS table, with the date that it was last refreshed - to be visually checked that all have been udpated as expected
+
+Once all tables have been updated, proceed with pre-processing queries
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+IF OBJECT_ID ('[MHDInternal].Temp_PreProc_RefreshStatus') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_PreProc_RefreshStatus
+
+SELECT
+	ViewName,
+	MAX(DateLoaded) AS [Table last refreshed date]
+
+INTO MHDInternal.Temp_PreProc_RefreshStatus
+
+FROM Admin.AutoRefreshLogging
+
+WHERE ViewName LIKE 'MESH_MHSDS%'
+
+GROUP BY ViewName
+
+
+--Show results - will give a single row per table - check visually that all tables have been refreshed as expected
+SELECT * FROM MHDInternal.Temp_PreProc_RefreshStatus
+ORDER BY [Table last refreshed date] ASC
+
+--Drop temporary table 
+DROP TABLE  MHDInternal.Temp_PreProc_RefreshStatus
+
