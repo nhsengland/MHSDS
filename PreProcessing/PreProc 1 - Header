@@ -1,0 +1,270 @@
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+CODE TO CHECK ROW COUNTS IN MART - TO BE RUN FOLLOWING EACH MONTHLY REFRESH
+
+Step 1 - update the PreProc_Header table with latest months
+
+Step 2 - checks for any changes to historic data from previous FYs, which would indicate an issue in the Mart refreshes. NOTE - the base PreProc_RowCounts table will need updating when we get the final data at the end of the FY
+
+Step 3 - checks changes to monthly row counts within the FY - to be eyeballed and any big shifts investigated
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----SET PARAMETERS
+DECLARE @EndRP INT
+
+DECLARE @ReportingPeriodEnd DATE
+
+SET @EndRP = (SELECT MAX(UniqMonthID)
+FROM [MESH_MHSDS].[MHS000Header]
+WHERE FileType = '2')
+
+SET @ReportingPeriodEnd = (SELECT MAX(ReportingPeriodEndDate) FROM [MESH_MHSDS].[MHS000Header] WHERE UniqMonthID = @EndRP) 
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+STEP 1 - UPDATE HEADER TABLE
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----LOG START
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Header Update Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+--START CODE
+INSERT INTO MHDInternal.PreProc_Header
+
+SELECT DISTINCT
+	h.UniqMonthID,
+	h.ReportingPeriodStartDate,
+	h.ReportingPeriodEndDate,
+	NULL AS [Der_MostRecentFlag],
+	NULL AS [Der_FYStart],
+	NULL AS [Der_FY]
+
+FROM [MESH_MHSDS].[MHS000Header] h
+
+WHERE h.UniqMonthID = @EndRP +1
+
+UPDATE h 
+	SET [Der_MostRecentFlag] = CASE WHEN h.UniqMonthID = @EndRP THEN 'Y' WHEN h.UniqMonthID = @EndRP+1 THEN 'P' ELSE NULL END,
+		[Der_FYStart] = CASE WHEN MONTH(h.ReportingPeriodStartDate) = 4 THEN 'Y' ELSE NULL END,
+		[Der_FY] = Fin_Year_YY_YY
+
+	FROM MHDInternal.PreProc_Header h 
+	
+	INNER JOIN [Internal_Reference].[Date_Full] d ON h.UniqMonthID = d.CMHT_MonthID
+
+
+----LOG START
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Header Update End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+STEP 2 - IDENTIFY NEW SUBMISSION IDS RECEIVED IN THE LATEST DATA REFRESH 
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----SET PARAMETERS 
+DECLARE @StartRP_FY INT
+
+SET @StartRP_FY	= (SELECT MAX(UniqMonthID)
+FROM MHDInternal.PreProc_Header
+WHERE Der_FYStart = 'Y')
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IDENTIFY NHSEUniqSubmissionID FOR NEW SUMISSIONS MADE IN LATEST REFRESH
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----LOG START
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Identify New Submissions Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+----START CODE
+IF OBJECT_ID ('MHDInternal.Temp_PreProc_NewSubmissions') IS NOT NULL
+DROP TABLE MHDInternal.Temp_PreProc_NewSubmissions
+
+SELECT 
+	h.NHSEUniqSubmissionID
+
+INTO MHDInternal.Temp_PreProc_NewSubmissions
+
+FROM MESH_MHSDS.MHS000Header h 
+
+INNER JOIN MESH_MHSDS.MHSDS_SubmissionFlags f ON h.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID AND f.Der_IsLatest = 'Y' 
+
+LEFT JOIN (SELECT DISTINCT NHSEUniqSubmissionID FROM MHDInternal.PreProc_Referral) r ON h.NHSEUniqSubmissionID = r.NHSEUniqSubmissionID 
+
+WHERE r.NHSEUniqSubmissionID IS NULL --Submission ID is not already in pre-processed table, so is  new in the latest submission
+
+
+----LOG END
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Identify New Submissions End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+STEP 3 - EXTRACT OF TOTAL ROW COUNTS PER TABLE - FOR COMPARISON TO WAREHOUSE
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----LOG START
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Row Counts Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+----START CODE
+IF OBJECT_ID ('MHDInternal.Temp_PreProc_RowCounts') IS NOT NULL
+DROP TABLE MHDInternal.Temp_PreProc_RowCounts
+
+select count(*) as count_MESH_MHSDS, 'MHS000Header' as tbl_name into MHDInternal.Temp_PreProc_RowCounts from MESH_MHSDS.MHS000Header   union all
+select count(*) as count_MESH_MHSDS, 'MHS001MPI' as tbl_name from MESH_MHSDS.MHS001MPI union all
+select count(*) as count_MESH_MHSDS, 'MHS002GP' as tbl_name from MESH_MHSDS.MHS002GP_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS003AccommStatus' as tbl_name from MESH_MHSDS.MHS003AccommStatus union all
+select count(*) as count_MESH_MHSDS, 'MHS004EmpStatus' as tbl_name from MESH_MHSDS.MHS004EmpStatus union all
+select count(*) as count_MESH_MHSDS, 'MHS005PatInd' as tbl_name from MESH_MHSDS.MHS005PatInd union all
+select count(*) as count_MESH_MHSDS, 'MHS006MHCareCoord' as tbl_name from MESH_MHSDS.MHS006MHCareCoord union all
+select count(*) as count_MESH_MHSDS, 'MHS007DisabilityType' as tbl_name from MESH_MHSDS.MHS007DisabilityType union all
+select count(*) as count_MESH_MHSDS, 'MHS008CarePlanType' as tbl_name from MESH_MHSDS.MHS008CarePlanType union all
+select count(*) as count_MESH_MHSDS, 'MHS008CrisisPlan' as tbl_name from MESH_MHSDS.MHS008CrisisPlan union all 
+select count(*) as count_MESH_MHSDS, 'MHS009CarePlanAgreement' as tbl_name from MESH_MHSDS.MHS009CarePlanAgreement union all
+select count(*) as count_MESH_MHSDS, 'MHS010AssTechToSupportDisTyp' as tbl_name from MESH_MHSDS.MHS010AssTechToSupportDisTyp union all
+select count(*) as count_MESH_MHSDS, 'MHS011SocPerCircumstances' as tbl_name from MESH_MHSDS.MHS011SocPerCircumstances union all
+select count(*) as count_MESH_MHSDS, 'MHS012OverseasVisitorChargCat' as tbl_name from MESH_MHSDS.MHS012OverseasVisitorChargCat union all
+select count(*) as count_MESH_MHSDS, 'MHS014eMED3FItNote' as tbl_name from MESH_MHSDS.MHS014eMED3FitNote union all
+select count(*) as count_MESH_MHSDS, 'MHS013MHCurrencyModel' as tbl_name from MESH_MHSDS.MHS013MHCurrencyModel union all
+select count(*) as count_MESH_MHSDS, 'MHS101Referral' as tbl_name from MESH_MHSDS.MHS101Referral_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS102ServiceTypeReferredTo' as tbl_name from MESH_MHSDS.MHS102ServiceTypeReferredTo union all
+select count(*) as count_MESH_MHSDS, 'MHS103OtherReasonReferral' as tbl_name from MESH_MHSDS.MHS103OtherReasonReferral union all
+select count(*) as count_MESH_MHSDS, 'MHS104RTT' as tbl_name from MESH_MHSDS.MHS104RTT union all
+select count(*) as count_MESH_MHSDS, 'MHS105OnwardReferral' as tbl_name from MESH_MHSDS.MHS105OnwardReferral union all
+select count(*) as count_MESH_MHSDS, 'MHS106DischargePlanAgreement' as tbl_name from MESH_MHSDS.MHS106DischargePlanAgreement union all
+select count(*) as count_MESH_MHSDS, 'MHS201CareContact' as tbl_name from MESH_MHSDS.MHS201CareContact_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS202CareActivity' as tbl_name from MESH_MHSDS.MHS202CareActivity_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS203OtherAttend' as tbl_name from MESH_MHSDS.MHS203OtherAttend union all
+select count(*) as count_MESH_MHSDS, 'MHS204IndirectActivity' as tbl_name from MESH_MHSDS.MHS204IndirectActivity_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS205PatientSDDI' as tbl_name from MESH_MHSDS.MHS205PatientSDDI union all 
+select count(*) as count_MESH_MHSDS, 'MHS206StaffActivity' as tbl_name from MESH_MHSDS.MHS206StaffActivity union all 
+select count(*) as count_MESH_MHSDS, 'MHS301GroupSession' as tbl_name from MESH_MHSDS.MHS301GroupSession_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS302MHDropInContact' as tbl_name from MESH_MHSDS.MHS302MHDropInContact union all
+select count(*) as count_MESH_MHSDS, 'MHS401MHActPeriod' as tbl_name from MESH_MHSDS.MHS401MHActPeriod union all
+select count(*) as count_MESH_MHSDS, 'MHS402RespClinicianAssignment' as tbl_name from MESH_MHSDS.MHS402RespClinicianAssignment union all
+select count(*) as count_MESH_MHSDS, 'MHS403ConditionalDischarge' as tbl_name from MESH_MHSDS.MHS403ConditionalDischarge union all
+select count(*) as count_MESH_MHSDS, 'MHS404CommTreatOrder' as tbl_name from MESH_MHSDS.MHS404CommTreatOrder union all
+select count(*) as count_MESH_MHSDS, 'MHS405CommTreatOrderRecall' as tbl_name from MESH_MHSDS.MHS405CommTreatOrderRecall union all
+select count(*) as count_MESH_MHSDS, 'MHS501HospProvSpell' as tbl_name from MESH_MHSDS.MHS501HospProvSpell union all
+select count(*) as count_MESH_MHSDS, 'MHS502WardStay' as tbl_name from MESH_MHSDS.MHS502WardStay_ALL union all
+select count(*) as count_MESH_MHSDS, 'MHS503AssignedCareProf' as tbl_name from MESH_MHSDS.MHS503AssignedCareProf union all
+select count(*) as count_MESH_MHSDS, 'MHS504DelayedDischarge' as tbl_name from MESH_MHSDS.MHS504DelayedDischarge union all
+select count(*) as count_MESH_MHSDS, 'MHS505RestrictiveInterventInc' as tbl_name from MESH_MHSDS.MHS505RestrictiveInterventInc union all
+select count(*) as count_MESH_MHSDS, 'MHS505RestrictiveIntervention' as tbl_name from MESH_MHSDS.MHS505RestrictiveIntervention union all  
+select count(*) as count_MESH_MHSDS, 'MHS506Assault' as tbl_name from MESH_MHSDS.MHS506Assault union all
+select count(*) as count_MESH_MHSDS, 'MHS507SelfHarm' as tbl_name from MESH_MHSDS.MHS507SelfHarm union all
+select count(*) as count_MESH_MHSDS, 'MHS509HomeLeave' as tbl_name from MESH_MHSDS.MHS509HomeLeave union all
+select count(*) as count_MESH_MHSDS, 'MHS510LeaveOfAbsence' as tbl_name from MESH_MHSDS.MHS510LeaveOfAbsence union all
+select count(*) as count_MESH_MHSDS, 'MHS511AbsenceWithoutLeave' as tbl_name from MESH_MHSDS.MHS511AbsenceWithoutLeave union all
+select count(*) as count_MESH_MHSDS, 'MHS512HospSpellComm' as tbl_name from MESH_MHSDS.MHS512HospSpellComm union all
+select count(*) as count_MESH_MHSDS, 'MHS513SubstanceMisuse' as tbl_name from MESH_MHSDS.MHS513SubstanceMisuse union all
+select count(*) as count_MESH_MHSDS, 'MHS514TrialLeave' as tbl_name from MESH_MHSDS.MHS514TrialLeave union all
+select count(*) as count_MESH_MHSDS, 'MHS515RestrictiveInterventType' as tbl_name from MESH_MHSDS.MHS515RestrictiveInterventType union all
+select count(*) as count_MESH_MHSDS, 'MHS516PoliceAssistanceRequest' as tbl_name from MESH_MHSDS.MHS516PoliceAssistanceRequest union all
+select count(*) as count_MESH_MHSDS, 'MHS517SMHExceptionalPackOfCare' as tbl_name from MESH_MHSDS.MHS517SMHExceptionalPackOfCare union all
+select count(*) as count_MESH_MHSDS, 'MHS518ClinReadyforDischarge' as tbl_name from MESH_MHSDS.MHS518ClinReadyforDischarge union all 
+select count(*) as count_MESH_MHSDS, 'MHS601MedHistPrevDiag' as tbl_name from MESH_MHSDS.MHS601MedHistPrevDiag union all
+select count(*) as count_MESH_MHSDS, 'MHS603ProvDiag' as tbl_name from MESH_MHSDS.MHS603ProvDiag union all
+select count(*) as count_MESH_MHSDS, 'MHS604PrimDiag' as tbl_name from MESH_MHSDS.MHS604PrimDiag union all
+select count(*) as count_MESH_MHSDS, 'MHS605SecDiag' as tbl_name from MESH_MHSDS.MHS605SecDiag union all
+select count(*) as count_MESH_MHSDS, 'MHS606CodedScoreAssessmentRefer' as tbl_name from MESH_MHSDS.MHS606CodedScoreAssessmentRefer union all
+select count(*) as count_MESH_MHSDS, 'MHS607CodedScoreAssessmentAct' as tbl_name from MESH_MHSDS.MHS607CodedScoreAssessmentAct union all
+select count(*) as count_MESH_MHSDS, 'MHS609PresComp' as tbl_name from MESH_MHSDS.MHS609PresComp union all
+select count(*) as count_MESH_MHSDS, 'MHS701CPACareEpisode' as tbl_name from MESH_MHSDS.MHS701CPACareEpisode union all
+select count(*) as count_MESH_MHSDS, 'MHS702CPAReview' as tbl_name from MESH_MHSDS.MHS702CPAReview union all
+select count(*) as count_MESH_MHSDS, 'MHS801ClusterTool' as tbl_name from MESH_MHSDS.MHS801ClusterTool union all
+select count(*) as count_MESH_MHSDS, 'MHS803CareCluster' as tbl_name from MESH_MHSDS.MHS803CareCluster union all
+select count(*) as count_MESH_MHSDS, 'MHS804FiveForensicPathways' as tbl_name from MESH_MHSDS.MHS804FiveForensicPathways union all
+select count(*) as count_MESH_MHSDS, 'MHS901StaffDetails' as tbl_name from MESH_MHSDS.MHS901StaffDetails union all
+select count(*) as count_MESH_MHSDS, 'MHS902ServiceTeamDetails' as tbl_name from MESH_MHSDS.MHS902ServiceTeamDetails union all 
+select count(*) as count_MESH_MHSDS, 'MHS903WardDetails' AS tbl_name from MESH_MHSDS.MHS903WardDetails union all 
+select count(*) as count_MESH_MHSDS, 'MESH_MHSDS_SubmissionFlags' as tbl_name from MESH_MHSDS.MHSDS_SubmissionFlags union all 
+select count_big(*) as count_MESH_MHSDS, 'MHS802ClusterAssess' as tbl_name from MESH_MHSDS.MHS802ClusterAssess 
+
+----Produce extract to be checked aginst the Warehouse
+SELECT *
+FROM MHDInternal.Temp_PreProc_RowCounts
+ORDER BY tbl_name 
+
+
+----LOG END
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Row Counts End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+------------DROP TABLES
+
+DROP TABLE MHDInternal.Temp_PreProc_RowCounts	
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+STEP 4 - EXTRACT OF ROW COUNTS RECEIVED IN THE LATEST SUBMISSIONS PER TABLE - FOR POPULATION OF PreProc_RecordCounts
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+----LOG START
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Record Counts Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+---- START CODE
+DROP TABLE MHDInternal.PreProc_RecordCounts
+SELECT GETDATE() AS Extract_date, 'MHS000Header' AS [TableName], h.OrgIDProvider, h.UniqMonthID, CASE WHEN s.FileType = 'Primary' THEN 1 WHEN s.FileType = 'Refresh' THEN 2 ELSE s.FileType END AS SubmissionType, COUNT(*) AS [RecordCount] 
+	INTO MHDInternal.PreProc_RecordCounts 
+	FROM MESH_MHSDS.[MHS000Header] h
+	INNER JOIN MESH_MHSDS.MHSDS_SubmissionFlags s ON h.NHSEUniqSubmissionID = s.NHSEUniqSubmissionID
+	GROUP BY h.OrgIDProvider, h.UniqMonthID, CASE WHEN s.FileType = 'Primary' THEN 1 WHEN s.FileType = 'Refresh' THEN 2 ELSE s.FileType END
+
+
+--LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT 
+	@EndRP AS [Month],
+	'MHSDS Record Counts Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
