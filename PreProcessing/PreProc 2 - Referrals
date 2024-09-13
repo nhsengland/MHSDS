@@ -1,0 +1,396 @@
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+MONTHLY PRE PROCESSING : REFERRALS AND MPI
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+DECLARE @EndRP INT
+
+SET @EndRP = (SELECT UniqMonthID
+FROM MHDInternal.[PreProc_Header]
+WHERE Der_MostRecentFlag = 'P')
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+STEP TWO - REFERRALS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+REFERRALS - DROP EXISTING INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Drop Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DROP INDEXES
+
+DROP INDEX ix_Referral ON MHDInternal.[PreProc_Referral]
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Drop Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+REFERRALS - DELETE DATA THAT HAS BEEN SUPERCEDED BY OTHER DATA
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Delete Data Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - DELETE DATA
+
+DELETE FROM MHDInternal.PreProc_Referral WHERE NHSEUniqSubmissionID IN (SELECT NHSEUniqSubmissionID FROM MESH_MHSDS.MHSDS_SubmissionFlags WHERE Der_IsLatest = 'N')
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Delete Data End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET GP-BASED COMMISSIONER FOR EACH RECORD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_MaxGP') IS NOT NULL
+DROP TABLE MHDInternal.Temp_MaxGP
+
+SELECT
+	gp.UniqMonthID,
+	gp.Der_Person_ID AS Person_ID,
+	gp.OrgIDCCGGPPractice,
+	gp.OrgIDSubICBLocGP,
+	gp.RecordNumber
+
+INTO MHDInternal.Temp_MaxGP 
+
+FROM MESH_MHSDS.MHS002GP_ALL gp
+
+	INNER JOIN
+		(
+		SELECT  UniqMonthID,
+				Der_Person_ID,
+				MAX(RecordNumber) AS RecordNumber 
+			FROM MESH_MHSDS.MHS002GP_ALL gp
+			WHERE GMPReg NOT IN ('V81999','V81998','V81997') AND EndDateGMPRegistration IS NULL 
+		GROUP BY UniqMonthID, Der_Person_ID
+		) max_GP
+		
+		ON GP.Der_Person_ID = max_GP.Der_Person_ID 
+		AND GP.RecordNumber = max_GP.RecordNumber
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions f ON gp.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID --- only latest data
+
+WHERE GP.GMPReg NOT IN ('V81999','V81998','V81997') 
+AND GP.EndDateGMPRegistration IS NULL 
+
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+REFERRALS - INSERT MPI + MHS101 REFERRALS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Insert Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - ALL DATA FROM LATEST WINDOW
+
+INSERT INTO MHDInternal.[PreProc_Referral] 
+
+SELECT
+	--header
+	h.[ReportingPeriodStartDate],
+    h.[ReportingPeriodEndDate],
+	h.[Der_FY], 
+	--MPI
+	m.[UniqSubmissionID],
+	m.[NHSEUniqSubmissionID],
+	m.[UniqMonthID],
+	m.[OrgIDProv],
+	m.[Der_Person_ID] AS Person_ID,
+	m.[Der_Pseudo_NHS_Number],
+	m.[RecordNumber],
+	m.[MHS001UniqID],
+
+	CASE 
+		WHEN m.[OrgIDSubICBLocResidence] IS NULL OR m.[OrgIDSubICBLocResidence] = '' THEN m.[OrgIDCCGRes]
+		ELSE m.[OrgIDSubICBLocResidence] END AS [Der_OrgIDCCGRes], --Where [OrgIDSubICBLocResidence] is not populated, then use OrgIDCCGRes - else use [OrgIDSubICBLocResidence]
+	m.[OrgIDCCGRes],
+	m.[OrgIDSubICBLocResidence],
+	
+	m.[OrgIDEduEstab],
+	m.[EthnicCategory],
+	m.[EthnicCategory2021], 
+
+	CASE WHEN m.GenderIDCode IN ('1','2','3','4','X','Z') THEN m.GenderIDCode ELSE m.[Gender] END AS [Der_Gender], --Derived Gender - used for routine reporting
+	m.[GenderIDCode], 
+	m.[GenderSameAtBirth], 
+	m.[Gender],
+	
+	m.[MaritalStatus],
+	m.[PersDeathDate],
+	m.[AgeDeath],
+	m.[LanguageCodePreferred],
+	m.[ElectoralWard],
+	m.[LADistrictAuth],
+	m.[LSOA2011],
+	m.[County],
+	m.[NHSNumberStatus],
+	m.[OrgIDLocalPatientId],
+	m.[PostcodeDistrict],
+	m.[DefaultPostcode],
+	m.[AgeRepPeriodStart],
+	m.[AgeRepPeriodEnd],
+--	m.[OrgIDEduEstab], --- new for v6 - this is already above, so commented out
+--	NULL AS [LSOA2021], -- new for v6 - moved to end
+	--referral
+	r.[MHS101UniqID],
+	r.[UniqServReqID],
+	r.[OrgIDComm],
+	r.[ReferralRequestReceivedDate],
+	r.[ReferralRequestReceivedTime],
+	LEFT(NHSServAgreeLineID,10) AS [NHSServAgreeLineNum],
+	r.[SpecialisedMHServiceCode],
+	r.[SourceOfReferralMH],
+	r.[OrgIDReferringOrg] AS [OrgIDReferring],
+	r.[ReferringCareProfessionalStaffGroup],
+	r.[ClinRespPriorityType],
+	r.[PrimReasonReferralMH],
+	r.[ReasonOAT],
+	r.[DecisionToTreatDate], 
+	r.[DecisionToTreatTime], 
+	r.[DischPlanCreationDate],
+	r.[DischPlanCreationTime],
+	r.[DischPlanLastUpdatedDate],
+	r.[DischPlanLastUpdatedTime],
+	r.[ServDischDate],
+	r.[ServDischTime],
+	r.[AgeServReferRecDate],
+	r.[AgeServReferDischDate],
+	--serv / team type
+	NULL AS [MHS102UniqID], --- replaced old MHS102UniqID column 
+	r.[UniqCareProfTeamLocalID] AS [UniqCareProfTeamID], --- is this the right way of handling v6 data?
+	s.[ServTeamTypeMH] AS [ServTeamTypeRefToMH],
+--	s.ServTeamIntAgeGroup, --- new for v6 - moved to end
+	ServDischDate AS [ReferClosureDate], -- removed in v6
+	ServDischTime AS [ReferClosureTime], -- removed in v6
+	r.[ReferRejectionDate],
+	r.[ReferRejectionTime],
+	r.[ReferClosReason],
+	r.[ReferRejectReason],
+	NULL AS [AgeServReferClosure], -- removed in v6
+	NULL AS [AgeServReferRejection],-- removed in v6
+	CASE
+		WHEN r.UniqMonthID <= 1467 AND gp.OrgIDCCGGPPractice IS NOT NULL THEN gp.OrgIDCCGGPPractice
+		WHEN r.UniqMonthID > 1467 AND gp.OrgIDSubICBLocGP IS NOT NULL THEN gp.OrgIDSubICBLocGP
+		WHEN r.UniqMonthID <= 1467 THEN m.OrgIDCCGRes
+		WHEN r.UniqMonthID > 1467 THEN m.OrgIDSubICBLocResidence 
+        ELSE 'ERROR'
+      END AS Der_SubICBCode,
+
+	----NEW V6 FIELDS
+	-- reference 
+	'MHS101' AS RefTable, --- added for v6 - moved to end 
+	--Other new fields here 
+	NULL AS [LSOA2021], -- new for v6 - moved to end
+	s.ServTeamIntAgeGroup --- new for v6 - moved to end
+
+FROM [MESH_MHSDS].MHS101Referral_ALL r
+
+INNER JOIN [MESH_MHSDS].MHS001MPI m ON r.RecordNumber = m.RecordNumber
+
+LEFT JOIN [MESH_MHSDS].MHS902ServiceTeamDetails s ON r.NHSEUniqSubmissionID = s.NHSEUniqSubmissionID AND r.UniqCareProfTeamLocalID = s.UniqCareProfTeamLocalID AND r.UniqMonthID = s.UniqMonthID
+
+LEFT JOIN [MHDInternal].[PreProc_Header] h ON h.UniqMonthID = r.UniqMonthID
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions f ON r.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID --- only latest data
+
+LEFT JOIN MHDInternal.Temp_MaxGP  gp ON r.Person_ID = gp.Person_ID AND r.UniqMonthID = gp.UniqMonthID
+
+
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+REFERRALS - INSERT MPI + MHS102 OTHER REFERRALS				
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+
+INSERT INTO MHDInternal.[PreProc_Referral] 
+
+SELECT
+	--header
+	h.[ReportingPeriodStartDate],
+    h.[ReportingPeriodEndDate],
+	h.[Der_FY],
+	--MPI
+	m.[UniqSubmissionID],
+	m.[NHSEUniqSubmissionID],
+	m.[UniqMonthID],
+	m.[OrgIDProv],
+	m.[Der_Person_ID] AS Person_ID,
+	m.Der_Pseudo_NHS_Number,
+	m.[RecordNumber],
+	m.[MHS001UniqID],
+
+	CASE 
+		WHEN m.[OrgIDSubICBLocResidence] IS NULL OR m.[OrgIDSubICBLocResidence] = '' THEN m.[OrgIDCCGRes]
+		ELSE m.[OrgIDSubICBLocResidence] END AS [Der_OrgIDCCGRes], --Where [OrgIDSubICBLocResidence] is not populated, then use OrgIDCCGRes - else use [OrgIDSubICBLocResidence]
+	m.[OrgIDCCGRes],
+	m.[OrgIDSubICBLocResidence],
+	
+	m.[OrgIDEduEstab],
+	m.[EthnicCategory],
+	m.[EthnicCategory2021], 
+
+	CASE WHEN m.GenderIDCode IN ('1','2','3','4','X','Z') THEN m.GenderIDCode ELSE m.[Gender] END AS [Der_Gender], --Derived Gender - used for routine reporting
+	m.[GenderIDCode], 
+	m.[GenderSameAtBirth], 
+	m.[Gender],
+	
+	m.[MaritalStatus],
+	m.[PersDeathDate],
+	m.[AgeDeath],
+	m.[LanguageCodePreferred],
+	m.[ElectoralWard],
+	m.[LADistrictAuth],
+	m.[LSOA2011],
+	m.[County],
+	m.[NHSNumberStatus],
+	m.[OrgIDLocalPatientId],
+	m.[PostcodeDistrict],
+	m.[DefaultPostcode],
+	m.[AgeRepPeriodStart],
+	m.[AgeRepPeriodEnd],
+	--m.[OrgIDEduEstab], --- new for v6 - already above so have commented out here
+	--m.[OrgIDLocalPatientId], -- new for v6 - already above so have commented out here
+--	NULL AS [LSOA2021], -- new for v6 - moved to end so have commented out here
+	--referral
+	r.[MHS101UniqID],
+	r.[UniqServReqID],
+	r.[OrgIDComm],
+	r.[ReferralRequestReceivedDate],
+	r.[ReferralRequestReceivedTime],
+	LEFT(NHSServAgreeLineID,10) AS [NHSServAgreeLineNum],
+	r.[SpecialisedMHServiceCode],
+	r.[SourceOfReferralMH],
+	r.[OrgIDReferringOrg] AS [OrgIDReferring],
+	r.[ReferringCareProfessionalStaffGroup],
+	r.[ClinRespPriorityType],
+	r.[PrimReasonReferralMH],
+	r.[ReasonOAT],
+	r.[DecisionToTreatDate], 
+	r.[DecisionToTreatTime], 
+	r.[DischPlanCreationDate],
+	r.[DischPlanCreationTime],
+	r.[DischPlanLastUpdatedDate],
+	r.[DischPlanLastUpdatedTime],
+	r.[ServDischDate],
+	r.[ServDischTime],
+	r.[AgeServReferRecDate],
+	r.[AgeServReferDischDate],
+	--serv / team type
+	ro.MHS102UniqID, --- replaced old MHS102UniqID column 
+	ro.UniqOtherCareProfTeamLocalID AS [UniqCareProfTeamID], --- is this the right way of handling v6 data?
+	s.[ServTeamTypeMH] AS ServTeamTypeRefToMH,
+--	s.ServTeamIntAgeGroup, --- new for v6 - moved to end
+	ro.[ReferClosureDate], -- only MHS102 in v6
+	ro.[ReferClosureTime], -- only MHS102 in v6
+	r.[ReferRejectionDate],
+	r.[ReferRejectionTime],
+	r.[ReferClosReason],
+	r.[ReferRejectReason],
+	ro.[AgeServReferClosure], -- only MHS102 in v6
+	ro.[AgeServReferRejection],-- only MHS102 in v6
+	CASE
+		WHEN r.UniqMonthID <= 1467 AND gp.OrgIDCCGGPPractice IS NOT NULL THEN gp.OrgIDCCGGPPractice
+		WHEN r.UniqMonthID > 1467 AND gp.OrgIDSubICBLocGP IS NOT NULL THEN gp.OrgIDSubICBLocGP
+		WHEN r.UniqMonthID <= 1467 THEN m.OrgIDCCGRes
+		WHEN r.UniqMonthID > 1467 THEN m.OrgIDSubICBLocResidence 
+        ELSE 'ERROR'
+      END AS Der_SubICBCode,
+
+	----NEW V6 FIELDS
+	 -- reference 
+	'MHS102' AS RefTable, --- added for v6
+	--Other new fields here
+	NULL AS [LSOA2021], -- new for v6 -----MOVED TO END	 
+	s.ServTeamIntAgeGroup --- new for v6 ----MOVED TO END
+
+
+FROM [MESH_MHSDS].MHS101Referral_ALL r
+
+INNER JOIN [MESH_MHSDS].MHS102ServiceTypeReferredTo ro ON r.RecordNumber = ro.RecordNumber AND r.UniqServReqID = ro.UniqServReqID
+
+INNER JOIN [MESH_MHSDS].MHS001MPI m ON r.RecordNumber = m.RecordNumber
+
+LEFT JOIN [MESH_MHSDS].MHS902ServiceTeamDetails s ON ro.NHSEUniqSubmissionID = s.NHSEUniqSubmissionID AND ro.UniqOtherCareProfTeamLocalID = s.UniqCareProfTeamLocalID  AND r.UniqMonthID = s.UniqMonthID
+
+LEFT JOIN [MHDInternal].[PreProc_Header] h ON h.UniqMonthID = r.UniqMonthID
+
+INNER JOIN MHDInternal.Temp_PreProc_NewSubmissions f ON r.NHSEUniqSubmissionID = f.NHSEUniqSubmissionID --- only latest data
+
+LEFT JOIN MHDInternal.Temp_MaxGP  gp ON r.Person_ID = gp.Person_ID AND r.UniqMonthID = gp.UniqMonthID
+
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Insert End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+WAITFOR DELAY '00:00:01'
+	
+/* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+REFERRALS - RECREATE INDEXES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/ 
+
+ --LOG START
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Create Index Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+-- START CODE - CREATE INDEXES
+
+CREATE INDEX ix_Referral ON MHDInternal.[PreProc_Referral] ([UniqMonthID], [RecordNumber], [OrgIDProv], [Person_ID], [UniqServReqID])
+
+-- LOG END
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Referral Create Index End' AS Step,
+	GETDATE() AS [TimeStamp]
+
