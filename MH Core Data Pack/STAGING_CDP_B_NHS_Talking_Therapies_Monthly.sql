@@ -1,47 +1,55 @@
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CODE FOR CORE DATA PACK DASHBOARD
 
-MEASURE NAME(s): CDP_B01: NHS Talking Therapies 18 Week Waits
-			     CDP_B02: NHS Talking Therapies 6 Week Waits
-				 CDP_B03: NHS Talking Therapies 1st-2nd Treatment >90 days
-				 CDP_B04: NHS Talking Therapies Access
+MEASURE NAME(s): CDP_B01: NHS Talking Therapies 18 Week Waits 
+			     CDP_B02: NHS Talking Therapies 6 Week Waits 
+				 CDP_B03: NHS Talking Therapies 1st-2nd Treatment >90 days 
+				 CDP_B04: NHS Talking Therapies Access  --Removed April 2024 
 				 CDP_B05: NHS Talking Therapies Recovery
+				 CDP_B06: NHS Talking Therapies Reliable Recovery --Added April 2024 
+				 CDP_B07: NHS Talking Therapies Reliable Improvement --Added April 2024 
+				 CDP_B08: NHS Talking Therapies Completing a Course of Treatment --Added April 2024 
 
 MEASURE DESCRIPTION(s):
-				 CDP_B01: Proportion of referrals that finished a course of treatment in the reporting period that waited 126 days or less for first treatment expressed as a percentage
-			     CDP_B02: Proportion of referrals that finished a course of treatment in the reporting period that waited 42 days or less for first treatment expressed as a percentage
+				 CDP_B01: Proportion of referrals that finished a course of treatment in the reporting period that waited 126 days or less for first treatment expressed as a percentage --Removed April 2024
+			     CDP_B02: Proportion of referrals that finished a course of treatment in the reporting period that waited 42 days or less for first treatment expressed as a percentage --Removed April 2024
 				 CDP_B03: The proportion of people who waited over 90 days between first and second treatment appointment (where the second treatment appointment occurred within the month) in the reporting period. 
 						  The primary purpose of this indicator is to measure the number of people who have waited more than 90 days between first and second appointments.  
-						  There should be no in treatment pathway waits (where the person has an early appointment but is then put on an ‘internal’ waiting list before a full course of treatment starts). 
-						  There should be appropriate measures taken to reduce the numbers of people who have waited over 90 days for a second appointment. 
-				 CDP_B04: The number of people who enter NHS funded treatment with IAPT Services in the reporting period (FirstTreatment)
-				 CDP_B05: The proportion of people who have attended at least two treatment contacts and are moving to recovery (defined as those who at initial assessment achieved "caseness” and at final session did not) in the reporting period. 
+						  There should be no in treatment pathway waits (where the person has an early appointment but is then put on an â€˜internalâ€™ waiting list before a full course of treatment starts). 
+						  There should be appropriate measures taken to reduce the numbers of people who have waited over 90 days for a second appointment. --Removed April 2024
+				 CDP_B04: The number of people who enter NHS funded treatment with IAPT Services in the reporting period (FirstTreatment) --Removed April 2024
+				 CDP_B05: The proportion of people who have attended at least two treatment contacts and are moving to recovery (defined as those who at initial assessment achieved "casenessâ€ and at final session did not) in the reporting period. 
 						  Column name in the IAPT quarterly report: Recovery Rate.
-				 
+				 CDP_B06: Proportion of referrals with a discharge date in the period that finished a course of treatment and showed reliable recovery (service user moved to recovery and shown reliable improvement). 
+						  Denominator is count of referrals finishing in the period minus those finishing a course of treatment who were not at caseness at initial assessment. --Added April 2024
+                 CDP_B07: Proportion of referrals with a discharge date in the period that finished a course of treatment that showed reliable improvement expressed as a percentage --Added April 2024           
+                 CDP_B08: Count of referrals with a discharge date in the period that had at least two treatment sessions (excluding follow up) --Added April 2024
+
+	 
 BACKGROUND INFO: Historic data will be sourced in a seperate script as data from prior to sep 2020 will come from IAPT v1.5 tables
 	 
 INPUT:			 
-				[NHSE_IAPT_v2].[dbo].[IDS101_Referral]
-				[NHSE_IAPT_v2].[dbo].[IDS001_MPI]
-				[NHSE_IAPT_v2].[dbo].[IDS000_Header]
-				[NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID]
-				[NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_ProviderSite]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
+				[mesh_IAPT].[IDS101referral]
+				[mesh_IAPT].[IDS001mpi]
+				[mesh_IAPT].[IDS000header]
+				[mesh_IAPT].[IsLatest_SubmissionID]
+				[Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+				 [Internal_Reference].[ComCodeChanges]
+				 [Reporting_UKHD_ODS].[Provider_Hierarchies]
+				 [Reporting_UKHD_ODS].[Provider_Site]
+				 [Internal_Reference].[Provider_Successor]
+				 [MHDInternal].[REFERENCE_CDP_Boundary_Population_Changes]
+				 [MHDInternal].[REFERENCE_CDP_LTP_Trajectories]
+				 [MHDInternal].[REFERENCE_CDP_Plans]
+				 [MHDInternal].[REFERENCE_CDP_Standards]
 
 TEMP TABLES:	 SEE DROPPED TABLES AT END OF THE SCRIPT.
 
-OUTPUT:			 [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+OUTPUT:			 [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
 
 WRITTEN BY:		 JADE SYKES 24/05/2023
 
-UPDATES:		 KIRSTY WALKER 16/10/2023 updated formatting, added [NHSE_Reference].[dbo].[tbl_Ref_ODS_ProviderSite] to provider lookup
+UPDATES:		 KIRSTY WALKER 16/10/2023 updated formatting, added [Reporting_UKHD_ODS].[Provider_Site] to provider lookup
 				 JADE SYKES    30/10/2023 VERSION 3:
 				                          Added new planning metrics (will become main script once signed off):
 										  CDP_B06: NHS Talking Therapies Reliable Recovery
@@ -52,6 +60,10 @@ UPDATES:		 KIRSTY WALKER 16/10/2023 updated formatting, added [NHSE_Reference].[
 				 KIRSTY WALKER 24/11/2023 adding comments for upcoming changes to submission window - Sep-23 and Oct-23 will both be submitted as performance data
 				 KIRSTY WALKER 07/12/2023 CHANGE FROM -1 T0 0 IN @Period_Start AND @Period_End VARIABLES FOR DEC-23 CHANGE TO SINGLE SUBMISSION WINDOW 
 										  (THERE USE TO BE A PROVISIONAL DATA WINDOW SO WE WOULD DO -1 TO GET THE PERFORMANCE DATA)
+				Tom Bardsley  August 2024 CDP_B06, CDP_B07 and CDP_B08 added foir April 2024 onwards
+
+
+
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -59,19 +71,18 @@ PRE-STEPS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 --Outline timeframe
 
-USE [NHSE_IAPT_v2]
+--USE [mesh_IAPT]
 
 DECLARE @Period_Start DATE
 DECLARE @Period_End DATE
 
-SET @Period_Start = (SELECT DATEADD(MONTH,0,MAX([ReportingPeriodStartDate])) FROM [IDS000_Header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
-SET @Period_End = (SELECT EOMONTH(DATEADD(MONTH,0,MAX([ReportingPeriodEndDate]))) FROM [dbo].[IDS000_Header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
-
+SET @Period_Start = (SELECT DATEADD(MONTH,0,MAX([ReportingPeriodStartDate])) FROM [mesh_IAPT].[IDS000header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
+SET @Period_End = (SELECT EOMONTH(DATEADD(MONTH,0,MAX([ReportingPeriodEndDate]))) FROM [mesh_IAPT].[IDS000header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
 PRINT @Period_Start
 PRINT @Period_End
 
 -- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+DELETE FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]  
 WHERE [Reporting_Period] BETWEEN @Period_Start AND @Period_End
 
 
@@ -89,8 +100,8 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 	   'NA' AS Region_Code,
 	   'NA' AS Region_Name,
 		-- NHS Talking Therapies Access
-		COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',
+		--COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
+		--					 THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 		-- NHS Talking Therapies Recovery
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
@@ -126,15 +137,18 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B07 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator'
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
+		-- NHS Talking Therapies Finishing a Course of Treatment 
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
 
-   INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
+   INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
 
-   FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+   FROM [mesh_IAPT].[IDS101referral] r
 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.UniqueSubmissionID = h.UniqueSubmissionID
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber 
+INNER JOIN [mesh_IAPT].[IDS000header] h ON r.UniqueSubmissionID = h.UniqueSubmissionID
+INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
 
 WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
   AND UsePathway_Flag = 'True'
@@ -153,9 +167,9 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 	   'NA' AS ICB_Name,
 	   Region_Code AS Region_Code,
 	   Region_Name AS Region_Name,
-	   -- NHS Talking Therapies Access
-	   COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',
-	   -- NHS Talking Therapies Recovery
+	   ---- NHS Talking Therapies Access
+	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
+	   ---- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
 						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
@@ -188,16 +202,19 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B07 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator'
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
+		-- NHS Talking Therapies Finishing a Course of Treatment 
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
 
-  FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+FROM [mesh_IAPT].[IDS101referral] r
 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber 
+INNER JOIN [mesh_IAPT].[IDS000header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
 WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
   AND UsePathway_Flag = 'True'
@@ -222,8 +239,8 @@ SELECT
 	   Region_Code AS Region_Code,
 	   Region_Name AS Region_Name,
 	   -- NHS Talking Therapies Access
-	   COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',
+	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
+				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
 						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
@@ -259,16 +276,19 @@ SELECT
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B07 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator'
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
+		-- NHS Talking Therapies Finishing a Course of Treatment 
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
 
-  FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+  FROM [mesh_IAPT].[IDS101referral] r
 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber 
+INNER JOIN [mesh_IAPT].[IDS000header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
 WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
   AND UsePathway_Flag = 'True'
@@ -294,8 +314,8 @@ SELECT
 	   Region_Code AS Region_Code,
 	   Region_Name AS Region_Name,
 	   -- NHS Talking Therapies Access
-	   COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',
+	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
+				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
 						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
@@ -331,15 +351,18 @@ SELECT
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B07 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator'
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
+		-- NHS Talking Therapies Finishing a Course of Treatment 
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
 
-  FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+  FROM [mesh_IAPT].[IDS101referral] r
 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
+INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber 
+INNER JOIN [mesh_IAPT].[IDS000header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
 WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
   AND UsePathway_Flag = 'True'
@@ -361,14 +384,14 @@ SELECT
 	   h.ReportingPeriodEndDate AS Reporting_Period,
 	   'Provider' AS Org_Type,
 	   COALESCE(ps.Prov_Successor, r.OrgID_Provider, 'Missing / Invalid' COLLATE database_default) AS 'Org_Code',
-	   COALESCE(ph.Organisation_Name, pu.ODS_ProvSite_OrgName) AS 'Org_Name',
+	   COALESCE(ph.Organisation_Name, pu.Site_Name) AS 'Org_Name',
 	   COALESCE(ph.STP_Code, puh.STP_Code) AS ICB_Code,
 	   COALESCE(ph.STP_Name, puh.STP_Name) AS ICB_Name,
 	   COALESCE(ph.Region_Code, puh.Region_Code) AS Region_Code,
 	   COALESCE(ph.Region_Name, puh.Region_Name) AS Region_Name,
 	   -- NHS Talking Therapies Access
-	   COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',
+	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
+				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND Recovery_Flag = 'True' 
 						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
@@ -403,23 +426,26 @@ SELECT
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B07 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator'
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
+		-- NHS Talking Therapies Finishing a Course of Treatment 
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
 
 
-FROM [NHSE_IAPT_v2].[dbo].[IDS101_Referral] r
+FROM [mesh_IAPT].[IDS101referral] r
 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS001_MPI] p ON r.recordnumber = p.recordnumber 
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IDS000_Header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
-INNER JOIN [NHSE_IAPT_v2].[dbo].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
+INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber 
+INNER JOIN [mesh_IAPT].[IDS000header] h ON r.[UniqueSubmissionID] = h.[UniqueSubmissionID]
+INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on r.OrgID_Provider = ps.Prov_original 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = ph.Organisation_Code 
+LEFT JOIN [Internal_Reference].[Provider_Successor] ps on r.OrgID_Provider = ps.Prov_original 
+LEFT JOIN [Reporting_UKHD_ODS].[Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = ph.Organisation_Code 
 -- It was noticed 16/10/23 that there were 2 organisations without org_name, icb_code, icb_name, region_code and region_name. 
 -- These were site ID's RDYLK and TAF90, the first join below returns the org name. The second join returns the hierarchies based on the parent provider code (i.e. RDY, TAF)
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_ProviderSite] pu ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = pu.Provider_Site_Code --to get org_name
-LEFT JOIN (SELECT DISTINCT Provider_Site_Code, STP_Code, STP_Name, Region_Code, Region_Name
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] phh
-					  INNER JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_ProviderSite] puu ON phh.Organisation_Code = puu.Provider_Code) puh ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = puh.Provider_Site_Code
+LEFT JOIN [Reporting_UKHD_ODS].[Provider_Site] pu ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = pu.Site_Code --to get org_name
+LEFT JOIN (SELECT DISTINCT Site_Code, STP_Code, STP_Name, Region_Code, Region_Name
+					  FROM [Reporting_UKHD_ODS].[Provider_Hierarchies] phh
+					  INNER JOIN [Reporting_UKHD_ODS].[Provider_Site] puu ON phh.Organisation_Code = puu.Trust_Code) puh ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = puh.Site_Code
 
 WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
   AND UsePathway_Flag = 'True'
@@ -429,11 +455,12 @@ GROUP BY
 h.[ReportingPeriodEndDate],
 Organisation_Name, 
 COALESCE(ps.Prov_Successor, r.OrgID_Provider, 'Missing / Invalid' COLLATE database_default),
-COALESCE(ph.Organisation_Name, pu.ODS_ProvSite_OrgName),
+COALESCE(ph.Organisation_Name, pu.Site_Name),
 COALESCE(ph.STP_Code, puh.STP_Code),
 COALESCE(ph.STP_Name, puh.STP_Name),
 COALESCE(ph.Region_Code, puh.Region_Code),
 COALESCE(ph.Region_Name, puh.Region_Name)
+
 
 -- cast as floats so all the same for the unpivot
 SELECT Reporting_Period,
@@ -444,7 +471,7 @@ SELECT Reporting_Period,
 	   ICB_Name,
 	   Region_Code,
 	   Region_Name,
-	   CAST([CDP_B04 Count] AS FLOAT) AS [CDP_B04 Count],
+	   --CAST([CDP_B04 Count] AS FLOAT) AS [CDP_B04 Count],
 	   CAST([CDP_B05 Numerator] AS FLOAT) AS [CDP_B05 Numerator],
 	   CAST([CDP_B05 Denominator] AS FLOAT) AS [CDP_B05 Denominator],
 	   CAST([CDP_B02 Numerator] AS FLOAT) AS [CDP_B02 Numerator],
@@ -456,11 +483,12 @@ SELECT Reporting_Period,
 	   CAST([CDP_B06 Numerator] AS FLOAT) AS [CDP_B06 Numerator],
 	   CAST([CDP_B06 Denominator] AS FLOAT) AS [CDP_B06 Denominator],
 	   CAST([CDP_B07 Numerator] AS FLOAT) AS [CDP_B07 Numerator],
-	   CAST([CDP_B07 Denominator] AS FLOAT) AS [CDP_B07 Denominator]
+	   CAST([CDP_B07 Denominator] AS FLOAT) AS [CDP_B07 Denominator],
+	   CAST([CDP_B08 Count] AS FLOAT) AS [CDP_B08 Count]
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
 
 --unpivot to new structure
 SELECT Reporting_Period,
@@ -474,13 +502,13 @@ SELECT Reporting_Period,
 	   Region_Name,
 	   Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
 
-FROM  (SELECT * FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]) p  
+FROM  (SELECT * FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]) p  
 
 UNPIVOT  
-([Measure_Value] FOR [TEMP_CDP_Measure_ID_Type] IN 
-		([CDP_B04 Count],[CDP_B05 Numerator],[CDP_B05 Denominator],[CDP_B02 Numerator],[CDP_B02 Denominator],[CDP_B01 Numerator],[CDP_B01 Denominator],[CDP_B03 Numerator],[CDP_B03 Denominator],[CDP_B06 Numerator],[CDP_B06 Denominator],[CDP_B07 Numerator],[CDP_B07 Denominator])   
+([Measure_Value] FOR [TEMP_CDP_Measure_ID_Type] IN --[CDP_B04 Count] Removed Arpril 2024
+		([CDP_B05 Numerator],[CDP_B05 Denominator],[CDP_B02 Numerator],[CDP_B02 Denominator],[CDP_B01 Numerator],[CDP_B01 Denominator],[CDP_B03 Numerator],[CDP_B03 Denominator],[CDP_B06 Numerator],[CDP_B06 Denominator],[CDP_B07 Numerator],[CDP_B07 Denominator],[CDP_B08 Count])   
 )AS unpvt;  
 
 -- Split out Measure ID and Measure Type into seperate columns
@@ -496,12 +524,12 @@ SELECT Reporting_Period,
 	   Region_Name,
 	   SUBSTRING([TEMP_CDP_Measure_ID_Type],9,LEN([TEMP_CDP_Measure_ID_Type])-8) AS Measure_Type,
 	   Measure_Value
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot] f
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot] f
 
 INNER JOIN (SELECT CDP_Measure_ID, CDP_Measure_Name, Measure_Type
-			  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA])i 
+			  FROM [MHDInternal].[REFERENCE_CDP_METADATA])i 
 		ON LEFT([TEMP_CDP_Measure_ID_Type],7) = i.CDP_Measure_ID
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -512,36 +540,36 @@ STEP 2: REALLOCATIONS
 
 -- Reallocations Data
 --GET LIST OF UNIQUE REALLOCATIONS FOR ORGS minus bassetlaw
-IF OBJECT_ID ('[NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+IF OBJECT_ID ('[MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
+DROP TABLE [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
 
 SELECT DISTINCT [From] COLLATE database_default as Orgs
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  INTO [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+  FROM [MHDInternal].[REFERENCE_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 UNION
 
 SELECT DISTINCT [Add] COLLATE database_default as Orgs
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  FROM [MHDInternal].[REFERENCE_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 -- Get Data for orgs in time periods which need reallocatings & put rest of data aside in no change table
  -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location)
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
 
- WHERE Org_Code IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+ WHERE Org_Code IN (SELECT Orgs FROM [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01'
 
 --No change data
 -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location) 
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
  WHERE Reporting_Period >='2022-07-01' 
-    OR (Org_Code NOT IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+    OR (Org_Code NOT IN (SELECT Orgs FROM [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01' )
 
 -- Calculate activity movement for donor orgs
@@ -555,10 +583,10 @@ SELECT
 	   r.Measure_Value * Change as Measure_Value_Change,
 	   [Add]
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
+INNER JOIN [MHDInternal].[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
  WHERE Bassetlaw_Indicator = 0
 
 -- Sum activity movement for orgs gaining (need to sum for Midlands Y60 which recieves from 2 orgs)
@@ -571,8 +599,8 @@ SELECT
 	   r.Measure_Type,
 	   SUM(Measure_Value_Change) as Measure_Value_Change
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From] r
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From] r
 
 GROUP BY 
 r.Reporting_Period,
@@ -598,10 +626,10 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value - Measure_Value_Change as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From] c 
         ON r.Org_Code = c.Org_Code 
        AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -623,9 +651,9 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value + Measure_Value_Change as Measure_Value
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add] c 
         ON r.Org_Code = c.Org_Code 
 	   AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -633,13 +661,13 @@ INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthl
 
 --Collate reallocations with no change data to create new 'master' table
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
 
 -- Calculate any percentages needed in the data
 SELECT 
@@ -665,14 +693,14 @@ SELECT
 			 END) 
 	    )*100  as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
 
   FROM (SELECT * 
-		  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
+		  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
 		 WHERE Measure_Type = 'Numerator') a
 INNER JOIN 
 	   (SELECT * 
-	      FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
+	      FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
 		 WHERE Measure_Type = 'Denominator') b  
 		    ON a.Reporting_Period = b.Reporting_Period 
 		   AND a.Org_Code = b.Org_Code 
@@ -682,13 +710,13 @@ INNER JOIN
 -- Collate Percentage calcs with rest of data
 SELECT * 
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
@@ -727,7 +755,9 @@ SELECT distinct
 			ELSE NULL 
 	   END AS LTP_Trajectory_Percentage_Achieved ,
 	   p.Plan_Rounded AS [Plan],
-	   CASE WHEN f.Measure_Type NOT IN ('Rate','Percentage','Numerator','Denominator') 
+	   CASE WHEN f.CDP_Measure_ID in ('CDP_B07','CDP_B06') and f.Measure_Type='Percentage'
+			THEN ROUND(CAST(Measure_Value/100 AS FLOAT)/NULLIF(CAST(p.[Plan] AS FLOAT),0),2) 
+			WHEN f.CDP_Measure_ID='CDP_B08' and  f.Measure_Type='Count'
 			THEN ROUND(CAST(Measure_Value AS FLOAT)/NULLIF(CAST(p.[Plan] AS FLOAT),0),2) 
 			ELSE NULL 
 	   END AS Plan_Percentage_Achieved,
@@ -735,20 +765,20 @@ SELECT distinct
 	   l.LTP_Trajectory_STR,
 	   p.Plan_STR
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]  f
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]  f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].REFERENCE_CDP_LTP_Trajectories l 
+LEFT JOIN [MHDInternal].REFERENCE_CDP_LTP_Trajectories l 
 	   ON f.Reporting_Period = l.Reporting_Period 
 	  AND f.Org_Code = l.Org_Code
 	  AND (CASE WHEN f.Measure_Type IN ('Percentage','Rate','Count') THEN f.CDP_Measure_ID ELSE NULL END) = l.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].REFERENCE_CDP_Plans p 
+LEFT JOIN [MHDInternal].REFERENCE_CDP_Plans p 
 	   ON f.Reporting_Period = p.Reporting_Period 
 	  AND f.Org_Code = p.Org_Code
 	  AND (CASE WHEN f.Measure_Type  IN ('Percentage','Rate','Count') THEN f.CDP_Measure_ID ELSE NULL END) = p.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].REFERENCE_CDP_Standards s 
+LEFT JOIN [MHDInternal].REFERENCE_CDP_Standards s 
 	   ON f.Reporting_Period = s.Reporting_Period 
 	   --not required to join on org_code here as it is a national standard
 	  AND (CASE WHEN f.Measure_Type  IN ('Percentage','Rate','Count') THEN f.CDP_Measure_ID ELSE NULL END) = s.CDP_Measure_ID 
@@ -758,15 +788,15 @@ STEP 4: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
-UPDATE [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+UPDATE [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
 SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) AS [Reporting_Period] 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest] 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
+  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest] 
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+INSERT INTO [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
 
 SELECT f.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL THEN 1 ELSE 0 END AS Is_Latest,
@@ -797,29 +827,29 @@ SELECT f.Reporting_Period,
 		CAST(Plan_Percentage_Achieved*100 AS VARCHAR)+'%' AS Plan_Percentage_Achieved_STR,
 		GETDATE() AS Last_Modified
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4] f
+  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest] i 
+LEFT JOIN [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest] i 
        ON f.Reporting_Period = i.Reporting_Period
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 5: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+DELETE FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
 WHERE Region_Code LIKE 'REG%' OR Org_Code IS NULL 
 OR (Org_Type = 'SubICB' AND  Org_Code NOT IN (SELECT DISTINCT Organisation_Code 
-												         FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] 
+												         FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] 
 											            WHERE Effective_To IS NULL 
 											              AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
 
 OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code 
-													 FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+													 FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
 													WHERE Effective_To IS NULL 
 													  AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
 
 OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code 
-														FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+														FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
 													   WHERE Effective_To IS NULL 
 													     AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
 
@@ -833,7 +863,7 @@ SELECT Distinct
 	   Org_Code
 
   FROM (SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Measure_Type, Org_Type, Org_Code,count(1) cnt
-          FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+          FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
       GROUP BY Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Measure_Type, Org_Type, Org_Code
          HAVING count(1) > 1) a
 
@@ -886,12 +916,12 @@ SELECT
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),3)
 	   END as Percentage_Change
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly] latest
+  FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly] latest
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN [MHDInternal].[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly] previous
+  LEFT JOIN [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -907,7 +937,7 @@ ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+  FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
   WHERE Measure_Value IS NOT NULL
 
 --kw UP TO HERE CHECKING TABLE NAMES
@@ -915,20 +945,22 @@ SELECT MAX(Reporting_Period)
 STEP 6: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest]
+
+
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_No_Change]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_From]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Changes_Add]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocations_Calc]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated_%]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Reallocated]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Master_4]
+DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Is_Latest]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
@@ -954,21 +986,21 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --	   Org_Name,
 --	   Measure_Type
 
---  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months]
+--  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months]
 
 --FROM (SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
+--		FROM [MHDInternal].[REFERENCE_CDP_LTP_Trajectories]
 --	   WHERE CDP_Measure_ID IN('CDP_B04') -- ADD MEASURE IDS FOR LTP TRAJECTORY METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets
 		 
 --	   UNION
 
 --	  SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] 
+--		FROM [MHDInternal].[REFERENCE_CDP_Plans] 
 --	   WHERE CDP_Measure_ID IN('CDP_B04') -- ADD MEASURE IDS FOR PLANNING METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets )_
 
---INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
+--INSERT INTO [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]
 --SELECT
 --	   f.Reporting_Period,
 --	   0 as Is_Latest,
@@ -996,12 +1028,12 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --	   NULL as Plan_Percentage_Achieved_STR,
 --	   GETDATE() as Last_Modified
 
---  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months] f
+--  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months] f
 
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
+--LEFT JOIN [MHDInternal].[REFERENCE_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
+--LEFT JOIN [MHDInternal].[REFERENCE_CDP_LTP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
 --INNER JOIN (SELECT DISTINCT Org_Code, Org_Name, ICB_Code, ICB_Name, Region_Code, Region_Name 
---			  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
+--			  FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
---DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months]
+--DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months]
 
