@@ -1,0 +1,411 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ACUTE DASHBOARD 
+
+LENGTH OF STAY
+
+CREATED BY TOM BARDSLEY 21 OCTOBER 2020
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+-- SET REPORTING PERIOD VARIABLES 
+
+DECLARE @RP_START INT
+DECLARE @RP_END INT
+DECLARE @RP_STARTDATE DATE
+DECLARE @RP_ENDDATE DATE
+
+SET @RP_START = 1405 
+SET @RP_END = (SELECT MAX(UniqMonthID) FROM MHDInternal.PreProc_Header) 
+
+SET @RP_STARTDATE = (SELECT MIN(ReportingPeriodStartDate) FROM MHDInternal.PreProc_Header WHERE UniqMonthID = @RP_START)
+SET @RP_ENDDATE = (SELECT MAX(ReportingPeriodEndDate) FROM MHDInternal.PreProc_Header WHERE UniqMonthID = @RP_END)
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START  
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@RP_END AS [Month],
+	'Acute LOS Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL DISCHARGED HOSPITAL SPELLS IN REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_AcuteDashboard_Spells') IS NOT NULL
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Spells
+
+SELECT 
+	i.UniqMonthID
+	,i.UniqHospProvSpellNum
+	,i.Person_ID
+	,i.StartDateHospProvSpell
+	,i.DischDateHospProvSpell 
+	,DATEADD(MONTH, DATEDIFF(MONTH, 0, i.DischDateHospProvSpell), 0) AS Disch_MonthYear
+	,i.OrgIDProv 
+	,o1.Organisation_Name AS Provider_Name
+	,CASE 
+		WHEN o1.ODS_Organisation_Type = 'NHS TRUST' THEN 'NHS TRUST'
+		WHEN o1.ODS_Organisation_Type = 'CARE TRUST' THEN 'NHS TRUST' 
+		WHEN o1.ODS_Organisation_Type IN ('INDEPENDENT SECTOR HEALTHCARE PROVIDER','INDEPENDENT SECTOR H/C PROVIDER SITE','NON-NHS ORGANISATION') THEN 'NON-NHS TRUST' 
+		ELSE 'Missing/Invalid' 
+	END as Provider_Type
+	,COALESCE(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
+	,COALESCE(o2.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,r.Der_SubICBCode,'Missing/Invalid') AS CCGCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [STP name]
+	,i.HospitalBedTypeMH
+	,CASE 
+		WHEN i.HospitalBedTypeMH IN ('10','11','12','200','201','202') THEN 'Adult Acute (CCG commissioned)' 
+		WHEN i.HospitalBedTypeMH IN ('13','14','15','16','17','18','19','20','21','22','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
+		WHEN i.HospitalBedTypeMH IN ('23','24','25','26','27','28','29','30','31','32','33','34','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
+		ELSE 'Missing/Invalid' 
+	END as BedType_Category
+	--,ISNULL(b.Main_Description_60_Chars,'Missing/Invalid') AS BedType
+	,ISNULL(b.NationalCodeDefinition,'Missing/Invalid') AS BedType
+	,r.AgeServReferRecDate
+	,CASE 
+		WHEN r.AgeServReferRecDate BETWEEN 0 AND 17 THEN '0-17' 
+		WHEN r.AgeServReferRecDate BETWEEN 18 AND 64 THEN '18-64' 
+		WHEN r.AgeServReferRecDate >= 65 THEN '65+' 
+	END as AgeCat
+	,DATEDIFF(DD, i.StartDateHospProvSpell, i.DischDateHospProvSpell)+1 as LOS
+	,ROW_NUMBER()OVER(PARTITION BY i.Person_ID, i.UniqHospProvSpellNum ORDER BY r.RecordNumber DESC) AS RN --- included to prevent duplicates when joining to Ref&MPI
+
+INTO MHDInternal.Temp_AcuteDashboard_Spells
+
+FROM MHDInternal.PreProc_Inpatients i 
+
+LEFT JOIN MHDInternal.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL OR r.LADistrictAuth = '') 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies o1 ON i.OrgIDProv = o1.Organisation_Code 
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON r.Der_SubICBCode = cc.Org_Code
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.Der_SubICBCode) = o2.Organisation_Code
+
+--LEFT JOIN UKHD_Data_Dictionary.Mental_Health_Admitted_Patient_Classification_SCD b ON i.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1
+LEFT JOIN MHDInternal.Reference_MHSDSv6_BedTypes b ON i.HospitalBedTypeMH = b.MHAdmittedPatientClass
+
+WHERE i.DischDateHospProvSpell IS NOT NULL ---- not using latest record, just looking at those with a discharge date
+AND i.UniqMonthID BETWEEN @RP_START AND @RP_END 
+AND i.DischDateHospProvSpell >= @RP_STARTDATE --- only discharges in this period 
+AND i.Der_LastWardStayRecord = 1 
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL CLOSED WARD STAYS IN REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_Acute_Dashboard_WardStays') IS NOT NULL
+DROP TABLE MHDInternal.Temp_AcuteDashboard_WardStays
+
+SELECT 
+	i.UniqMonthID
+	,h.ReportingPeriodStartDate
+	,h.ReportingPeriodEndDate
+	,i.UniqHospProvSpellNum
+	,i.UniqWardStayID
+	,i.Person_ID
+	,i.StartDateWardStay
+	,i.EndDateWardStay
+	,CASE WHEN i.StartDateWardStay < h.ReportingPeriodStartDate THEN h.ReportingPeriodStartDate ELSE i.StartDateWardStay END AS Der_WrdStartDate
+	,CASE WHEN i.EndDateWardStay IS NULL THEN DATEADD(DD, 1, h.ReportingPeriodEndDate) ELSE i.EndDateWardStay END AS Der_WrdEndDate
+	,DATEADD(MONTH, DATEDIFF(MONTH, 0, i.EndDateWardStay), 0) AS Disch_MonthYear
+	,i.OrgIDProv 
+	,o1.Organisation_Name AS Provider_Name
+	,CASE 
+		WHEN o1.ODS_Organisation_Type = 'NHS TRUST' THEN 'NHS TRUST'
+		WHEN o1.ODS_Organisation_Type = 'CARE TRUST' THEN 'NHS TRUST' 
+		WHEN o1.ODS_Organisation_Type IN ('INDEPENDENT SECTOR HEALTHCARE PROVIDER','INDEPENDENT SECTOR H/C PROVIDER SITE','NON-NHS ORGANISATION') THEN 'NON-NHS TRUST' 
+		ELSE 'Missing/Invalid' 
+	END as Provider_Type
+	,COALESCE(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
+	,COALESCE(o2.Region_Name, 'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,r.Der_SubICBCode,'Missing/Invalid') AS CCGCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [STP name]
+	,i.HospitalBedTypeMH
+	,CASE 
+		WHEN i.HospitalBedTypeMH IN ('10','11','12','200','201','202') THEN 'Adult Acute (CCG commissioned)' 
+		WHEN i.HospitalBedTypeMH IN ('13','14','15','16','17','18','19','20','21','22','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
+		WHEN i.HospitalBedTypeMH IN ('23','24','25','26','27','28','29','30','31','32','33','34','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
+		ELSE 'Missing/Invalid' 
+	END as BedType_Category
+	--,ISNULL(b.Main_Description_60_Chars,'Missing/Invalid') AS BedType
+	,ISNULL(b.NationalCodeDefinition,'Missing/Invalid') AS BedType
+	,r.AgeServReferRecDate
+	,CASE 
+		WHEN r.AgeServReferRecDate BETWEEN 0 AND 17 THEN '0-17' 
+		WHEN r.AgeServReferRecDate >=18 THEN '18+' 
+	END as AgeCat
+	,DATEDIFF(DD, i.StartDateWardStay, i.EndDateWardStay)+1 as LOS
+	,CASE WHEN i.EndDateWardStay >= @RP_STARTDATE THEN 'Y' ELSE NULL END as DischFlag
+	,ROW_NUMBER() OVER(PARTITION BY i.Person_ID, i.UniqServReqID, i.UniqHospProvSPellNum, i.UniqWardStayID ORDER BY i.UniqMonthID DESC) as Der_WardStayRecordOrder
+
+INTO MHDInternal.Temp_AcuteDashboard_WardStays
+
+FROM MHDInternal.PreProc_Inpatients i 
+
+LEFT JOIN MHDInternal.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL OR r.LADistrictAuth = '') 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies o1 ON i.OrgIDProv = o1.Organisation_Code 
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON r.Der_SubICBCode = cc.Org_Code
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.Der_SubICBCode) = o2.Organisation_Code
+
+--LEFT JOIN UKHD_Data_Dictionary.Mental_Health_Admitted_Patient_Classification_SCD b ON i.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1
+LEFT JOIN MHDInternal.Reference_MHSDSv6_BedTypes b ON i.HospitalBedTypeMH = b.MHAdmittedPatientClass
+LEFT JOIN MHDInternal.PreProc_Header h ON i.UniqMonthID = h.UniqMonthID
+
+WHERE  i.UniqMonthID BETWEEN @RP_START AND @RP_END 
+AND i.UniqWardStayID IS NOT NULL --- exclude spells with no ward stays recorded
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE DISCHARGED SPELLS AND CLOSED WARD STAYS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+if OBJECT_ID('MHDInternal.Temp_AcuteDashboard_Comb') is not null
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Comb
+
+SELECT
+	'Provider Spells' AS Record_Type
+	,UniqHospProvSpellNum AS Record_ID
+	,Person_ID
+	,StartDateHospProvSpell AS StartDate
+	,DischDateHospProvSpell AS EndDate
+	,Disch_MonthYear
+	,OrgIDProv 
+	,Provider_Name
+	,Provider_Type
+	,Region_Code
+	,Region_Name 
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,HospitalBedTypeMH
+	,BedType_Category 
+	,BedType
+	,AgeServReferRecDate
+	,AgeCat
+	,LOS
+	
+INTO MHDInternal.Temp_AcuteDashboard_Comb
+FROM MHDInternal.Temp_AcuteDashboard_Spells 
+--WHERE RN = 1 
+
+UNION ALL 
+
+SELECT 
+	'Ward Stays' AS Record_Type
+	,UniqWardstayID AS Record_ID
+	,Person_ID
+	,StartDateWardStay AS StartDate
+	,EndDateWardStay AS EndDate
+	,Disch_MonthYear
+	,OrgIDProv 
+	,Provider_Name
+	,Provider_Type
+	,Region_Code
+	,Region_Name 
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,HospitalBedTypeMH
+	,BedType_Category 
+	,BedType
+	,AgeServReferRecDate
+	,AgeCat
+	,LOS
+
+FROM MHDInternal.Temp_AcuteDashboard_WardStays 
+
+WHERE Der_WardStayRecordOrder = 1 AND DischFlag = 'Y' ---- only closed ward stays for the LOS measure
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET TOTAL OCCUPIED BED DAYS FROM ALL WARD STAYS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+if OBJECT_ID('MHDInternal.Temp_AcuteDashboard_BedDays') is not null
+DROP TABLE MHDInternal.Temp_AcuteDashboard_BedDays
+
+SELECT 
+	*
+	,DATEDIFF(DD,Der_WrdStartDate,Der_WrdEndDate) AS BedDays
+INTO MHDInternal.Temp_AcuteDashboard_BedDays
+FROM MHDInternal.Temp_AcuteDashboard_WardStays 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE BED DAYS, DISCHARGES AND LOS FOR SPELLS AND WARD STAYS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+if OBJECT_ID('MHDInternal.Temp_AcuteDashboard_AggLOS') is not null
+DROP TABLE MHDInternal.Temp_AcuteDashboard_AggLOS
+
+SELECT 
+	Disch_MonthYear
+	,OrgIDProv 
+	,Provider_Name 
+	,Provider_Type
+	,Region_Code
+	,Region_Name
+	,CCGCode 
+	,[CCG name] 
+	,STPCode
+	,[STP name] 
+	,BedType_Category
+	,BedType 
+	,ISNULL(AgeCat,'Missing/Invalid') AS AgeCat
+	,SUM(CASE WHEN Record_Type = 'ward stays' THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as DischWardStays
+	,SUM(CASE WHEN Record_Type = 'ward stays' THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as DischWardStays2
+	,SUM(CASE WHEN Record_Type = 'ward stays' THEN CAST(LOS AS NUMERIC(10,2)) ELSE 0 end) as LOSWardStays
+	,VARP(CASE WHEN Record_Type = 'ward stays' THEN CAST(LOS AS NUMERIC(10,2)) ELSE 0 end) as LOSWardStays_var --- variance used to estimate SE
+	,SUM(CASE WHEN Record_Type = 'ward stays' AND LOS <= 3 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as WardStays_less3days
+	,SUM(CASE WHEN Record_Type = 'ward stays' AND LOS > 40 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as WardStays_over40days
+	,SUM(CASE WHEN Record_Type = 'ward stays' AND LOS > 60 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as WardStays_over60days
+	,SUM(CASE WHEN Record_Type = 'ward stays' AND LOS > 90 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as WardStays_over90days
+
+	,SUM(CASE WHEN Record_Type = 'provider spells' THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as DischSpells
+	,SUM(CASE WHEN Record_Type = 'provider spells' THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as DischSpells2
+	,SUM(CASE WHEN Record_Type = 'provider spells' THEN CAST(LOS AS NUMERIC(10,2)) ELSE 0 end) as LOSSpells
+	,VARP(CASE WHEN Record_Type = 'provider spells' THEN CAST(LOS AS NUMERIC(10,2)) ELSE 0 end) as LOSSpells_var -- variance used to estimate SE 
+	,SUM(CASE WHEN Record_Type = 'provider spells' AND LOS <= 3 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as Spells_less3days
+	,SUM(CASE WHEN Record_Type = 'provider spells' AND LOS > 40 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as Spells_over40days
+	,SUM(CASE WHEN Record_Type = 'provider spells' AND LOS > 60 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as Spells_over60days
+	,SUM(CASE WHEN Record_Type = 'provider spells' AND LOS > 90 THEN CAST(1 AS NUMERIC(10,2)) ELSE 0 end) as Spells_over90days
+
+INTO MHDInternal.Temp_AcuteDashboard_AggLOS
+FROM MHDInternal.Temp_AcuteDashboard_Comb
+GROUP BY Disch_MonthYear, OrgIDProv, Provider_Name, Provider_Type, Region_Code, Region_Name, CCGCode, [CCG Name], STPCode, [STP name], BedType_Category, BedType, AgeCat
+
+
+if OBJECT_ID('MHDInternal.Temp_AcuteDashboard_Agg_BedDays') is not null
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Agg_BedDays
+
+SELECT 
+	b.ReportingPeriodStartDate 
+	,b.OrgIDProv 
+	,b.Provider_Name 
+	,b.Provider_Type
+	,b.Region_Code
+	,b.Region_Name
+	,b.CCGCode
+	,b.[CCG name] 
+	,b.STPCode
+	,b.[STP name] 
+	,b.BedType_Category
+	,b.BedType 
+	,ISNULL(b.AgeCat,'Missing/Invalid') AS AgeCat
+	,SUM(ISNULL(BedDays*1.00,0)) as BedDays 
+	,SUM(ISNULL(BedDays*1.00,0)) as BedDays2
+
+INTO MHDInternal.Temp_AcuteDashboard_Agg_BedDays
+
+FROM MHDInternal.Temp_AcuteDashboard_BedDays b 
+WHERE BedDays IS NOT NULL 
+
+GROUP BY b.ReportingPeriodStartDate ,b.OrgIDProv ,b.Provider_Name , b.Provider_Type, b.Region_Code,b.Region_Name,b.CCGCode ,b.[CCG name] ,b.STPCode,b.[STP name] ,b.BedType, b.BedType_Category ,b.AgeCat  
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOT AND CREATE EXTRACT
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_AcuteDashboard_Output') IS NOT NULL
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Output
+
+SELECT 
+	Disch_MonthYear AS ReportingPeriod
+	,OrgIDProv 
+	,Provider_Name 
+	,Provider_Type
+	,Region_Code
+	,Region_Name
+	,CCGCode 
+	,[CCG name] 
+	,STPCode
+	,[STP name] 
+	,BedType_Category
+	,BedType 
+	,AgeCat
+	,MeasureName
+	,MeasureValue 
+	,CASE 
+		WHEN MeasureName IN('LOSWardStays','LOSWardStays_ln','WardStays_less3days','WardStays_over40days','WardStays_over60days','WardStays_over90days') THEN DischWardStays2 
+		WHEN MeasureName IN('LOSSpells','LOSSpells_ln','Spells_less3days','Spells_over40days','Spells_over60days','Spells_61_90days','Spells_over90days') THEN DischSpells2 
+	END as Denominator
+
+INTO MHDInternal.Temp_AcuteDashboard_Output
+
+FROM MHDInternal.Temp_AcuteDashboard_AggLOS
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(DischWardStays, LOSWardStays, WardStays_less3days, WardStays_over40days, WardStays_over60days,WardStays_over90days,
+		DischSpells, LOSSpells, Spells_less3days, Spells_over40days, Spells_over60days,Spells_over90days)) u 
+
+UNION ALL 
+
+SELECT 
+	ReportingPeriodStartDate AS ReportingPeriod 
+	,OrgIDProv
+	,Provider_Name
+	,Provider_Type
+	,Region_Code
+	,Region_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,BedType_Category
+	,BedType
+	,AgeCat
+	,MeasureName
+	,MeasureValue
+	,BedDays2 AS Denominator
+
+
+FROM MHDInternal.Temp_AcuteDashboard_Agg_BedDays 
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(BedDays)) u
+
+
+IF OBJECT_ID ('MHDInternal.Staging_Acute_LOS') IS NOT NULL
+drop table MHDInternal.Staging_Acute_LOS
+select * 
+into MHDInternal.Staging_Acute_LOS
+from MHDInternal.Temp_AcuteDashboard_Output
+
+
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Spells
+DROP TABLE MHDInternal.Temp_AcuteDashboard_WardStays
+DROP TABLE MHDInternal.Temp_ACuteDashboard_Comb
+DROP TABLE MHDInternal.Temp_AcuteDashboard_BedDays
+DROP TABLE MHDInternal.Temp_AcuteDashboard_AggLOS
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Agg_BedDays
+DROP TABLE MHDInternal.Temp_AcuteDashboard_Output
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG END  
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@RP_END AS [Month],
+	'Acute LOS End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+END 
