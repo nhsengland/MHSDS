@@ -1,0 +1,374 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UECMH DASHBOARD 
+
+ECDS ANALYSIS 
+
+CREATED BY TOM BARDSLEY 30 JANUARY 2024
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DECLARE @EndRP INT 
+SET @EndRP = (SELECT MAX(UniqMonthID) FROM MHDInternal.PreProc_Header)
+
+DECLARE @EndDate DATE 
+SET @EndDate = (SELECT MAX(DATEADD(MONTH, DATEDIFF(MONTH, 0, Arrival_Date), 0)) FROM MESH_ECDS.EC_Core) 
+
+DECLARE @StartDate DATE 
+SET @StartDate = DATEADD(MM,-5,@EndDate) -- get 6 months
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'UECMH ECDS Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL ATTENDANCES FROM ECDS IN TYPE 1 EDs
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_UEC_ECDS_ECDS') IS NOT NULL
+DROP TABLE MHDInternal.Temp_UEC_ECDS_ECDS
+
+SELECT 
+	a.Generated_Record_ID
+	,a.Der_Provider_Code 
+	,COALESCE(o1.Organisation_Name,'Missing/Invalid') AS Der_Provider_Name
+	,a.Der_Provider_Site_Code 
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS Der_Provider_Site_Name
+	,COALESCE(o3.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG of provider rather than CCG of residence
+	,COALESCE(o3.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,a.Attendance_HES_CCG_From_Treatment_Site_Code,'Missing/Invalid') AS CCGCode
+	,COALESCE(o3.Organisation_Name,'Missing/Invalid') AS [CCG name]
+	,COALESCE(o3.STP_Code,'Missing/Invalid') AS STPCode
+	,COALESCE(o3.STP_Name,'Missing/Invalid') AS [STP name]
+	,DATEADD(MONTH, DATEDIFF(MONTH, 0, Arrival_Date), 0) MonthYear
+	,a.Arrival_Date 
+	,DATEPART(HOUR, a.Arrival_Time) as Arrival_Hour 
+	,CAST(ISNULL(a.Arrival_Time,'00:00:00') AS datetime) + CAST(a.Arrival_Date AS datetime) AS ArrivalDateTime
+	,a.EC_Departure_Date 
+	,a.EC_Departure_Time
+	,CAST(ISNULL(a.EC_Departure_Time,'00:00:00') AS datetime) + CAST(a.EC_Departure_Date AS datetime) AS DepartureDateTime
+	,a.EC_Departure_Time_Since_Arrival
+	,a.EC_Initial_Assessment_Time_Since_Arrival
+	,a.EC_Chief_Complaint_SNOMED_CT
+	,a.EC_Injury_Intent_SNOMED_CT
+	,a.Der_EC_Diagnosis_All
+	,COALESCE(LEFT(a.Der_EC_Diagnosis_All, NULLIF(CHARINDEX(',',a.Der_EC_Diagnosis_All),0)-1),a.Der_EC_Diagnosis_All) AS PrimaryDiagnosis
+	,a.Age_At_Arrival 
+	,CASE 
+		WHEN a.Age_At_Arrival BETWEEN 0 AND 11 THEN '0-11'  
+		WHEN a.Age_At_Arrival BETWEEN 12 AND 17 THEN '12-17'
+		WHEN a.Age_At_Arrival BETWEEN 18 AND 25 THEN '18-25'
+		WHEN a.Age_At_Arrival BETWEEN 26 AND 64 THEN '26-64' 
+		WHEN a.Age_At_Arrival >= 65 THEN '65+' 
+		ELSE 'Missing/Invalid' 
+	END as AgeCat 
+	,CASE WHEN EC_Chief_Complaint_SNOMED_CT IS NOT NULL THEN 1 ELSE 0 END as Val_ChiefComplaint
+	,CASE WHEN a.EC_Injury_Date IS NOT NULL THEN 1 ELSE 0 END as InjuryFlag
+	,CASE WHEN a.EC_Injury_Date IS NOT NULL AND EC_Injury_Intent_SNOMED_CT IS NOT NULL THEN 1 ELSE 0 END as Val_InjuryIntent
+	,CASE WHEN Der_EC_Diagnosis_All IS NOT NULL THEN 1 ELSE 0 END as Val_Diagnosis
+	,CASE 
+			WHEN EC_Chief_Complaint_SNOMED_CT IN ('248062006' --- self harm
+				,'272022009' --- depressive feelings 
+				,'48694002' --- feeling anxious 
+				,'248020004' --- behaviour: unsual 
+				,'6471006' -- feeling suicidal
+				,'7011001') THEN 1  --- hallucinations/delusions 
+			WHEN EC_Injury_Intent_SNOMED_CT = '276853009' THEN 1 --- self inflicted injury 
+			WHEN COALESCE(LEFT(Der_EC_Diagnosis_All, NULLIF(CHARINDEX(',',Der_EC_Diagnosis_All),0)-1),Der_EC_Diagnosis_All) 
+				IN ('52448006' --- dementia
+				,'2776000' --- delirium 
+				,'33449004' --- personality disorder
+				,'72366004' --- eating disorder
+				,'197480006' --- anxiety disorder
+				,'35489007' --- depressive disorder
+				,'13746004' --- bipolar affective disorder
+				,'58214004' --- schizophrenia
+				,'69322001' --- psychotic disorder
+				,'397923000' --- somatisation disorder
+				,'30077003' --- somatoform pain disorder
+				,'44376007' --- dissociative disorder
+				,'17226007' ---- adjustment disorder
+				,'50705009'---- factitious disorder
+				,'191736004' -- obsessive compulsive disorder 
+				,'371631005' -- panic disorer
+				) THEN 1 
+		ELSE 0 
+		END as MH_Flag 
+	,CASE 
+		WHEN EC_Injury_Intent_SNOMED_CT = '276853009' THEN 1
+		WHEN EC_Chief_Complaint_SNOMED_CT = '248062006' THEN 1
+		ELSE 0 
+	END as SelfHarm_Flag 
+	
+INTO MHDInternal.Temp_UEC_ECDS_ECDS
+
+FROM MESH_ECDS.EC_Core a 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies o1 ON a.Der_Provider_Code = o1.Organisation_Code --- providers 
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies o2 ON a.Der_Provider_Site_Code = o2.Organisation_Code --- sites
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON a.Attendance_HES_CCG_From_Treatment_Site_Code = cc.Org_Code 
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o3 ON COALESCE(cc.New_Code,a.Attendance_HES_CCG_From_Treatment_Site_Code) = o3.Organisation_Code --- CCG / STP / Region 
+
+WHERE a.EC_Department_Type = '01' --- Type 1 EDs only 
+AND a.Arrival_Date BETWEEN @StartDate AND @EndDate
+
+AND (EC_Discharge_Status_SNOMED_CT IS NULL OR EC_Discharge_Status_SNOMED_CT  NOT IN ('1077031000000103','1077781000000101', '63238001')) --exclude streamed and Dead on arrival
+AND ([EC_AttendanceCategory] IS NULL OR [EC_AttendanceCategory] in ('1','2','3'))   --exclude follow ups and Dead on arrival
+
+AND a.Deleted = 0 
+
+AND a.EC_Departure_Date < GETDATE()
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CLEAN PROVIDER SITE NAMES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_UEC_ECDS_Sites') IS NOT NULL
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Sites
+
+SELECT
+	Generated_Record_ID
+	,Der_Provider_Code 
+	,Der_Provider_Name
+	,Der_Provider_Site_Code 
+	,CASE 
+		WHEN Der_Provider_Site_Name = 'Missing/Invalid' THEN 'Missing/Invalid' 
+		ELSE Der_Provider_Site_Code
+	END as Der_Provider_Site_Code_cleaned
+	,Der_Provider_Site_Name
+	,CASE 
+		WHEN Der_Provider_Site_Name = 'Missing/Invalid' THEN CONCAT(Der_Provider_Name,':',' ','missing site name') 
+		ELSE Der_Provider_Site_Name 
+	END as Der_Provider_Site_Name_cleaned
+	,Region_Code --- regions taken from CCG rather than provider 
+	,Region_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,MonthYear
+	,Arrival_Date 
+	,ArrivalDateTime
+	,EC_Departure_Date 
+	,EC_Departure_Time
+	,DepartureDateTime
+	,EC_Departure_Time_Since_Arrival
+	,EC_Initial_Assessment_Time_Since_Arrival
+	,EC_Chief_Complaint_SNOMED_CT
+	,EC_Injury_Intent_SNOMED_CT
+	,Der_EC_Diagnosis_All
+	,PrimaryDiagnosis
+	,Age_At_Arrival 
+	,AgeCat 
+	,Val_ChiefComplaint 
+	,InjuryFlag
+	,Val_InjuryIntent
+	,Val_Diagnosis
+	,MH_Flag 
+	,SelfHarm_Flag 
+
+INTO MHDInternal.Temp_UEC_ECDS_Sites
+
+FROM MHDInternal.Temp_UEC_ECDS_ECDS
+
+
+
+ /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE TO GET ACCESS AND WAITING TIME METRICS
+NB: EXCLUDE THOSE OVER 24HRS FROM WAITING TIMES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_UEC_ECDS_Agg') IS NOT NULL
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Agg
+
+SELECT 
+	MonthYear
+	,Der_Provider_Site_Code_cleaned
+	,Der_Provider_Site_Name_cleaned
+	,Der_Provider_Code
+	,Der_Provider_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,Region_Code
+	,Region_Name
+	,AgeCat
+	,COUNT(*) as ED_Attendances
+	,SUM(Val_ChiefComplaint) as Val_ChiefComplaint
+	,SUM(Val_Diagnosis) as Val_Diagnosis
+	,SUM(InjuryFlag) as InjuryFlag
+	,SUM(Val_InjuryIntent) as Val_InjuryIntent
+	,SUM(MH_Flag) as MH_attendances
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival < (24*60) THEN MH_Flag ELSE 0 END) as MH_attendances_trimmed -- exclude times over 24 hours when calculating waiting times
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival < (24*60) THEN 1 ELSE 0 END) as All_attendances_trimmed
+	,SUM(SelfHarm_Flag) as SelfHarm_Attendances
+	,SUM(CASE WHEN MH_Flag = 1  THEN EC_Departure_Time_Since_Arrival ELSE 0 END) as MH_TotalTimeInED
+	,SUM(CASE WHEN MH_Flag = 1 AND EC_Departure_Time_Since_Arrival > (60*6) THEN 1 ELSE 0 END) as MH_Breach6hrs 
+	,SUM(CASE WHEN MH_Flag = 1 AND EC_Departure_Time_Since_Arrival > (60*6) THEN EC_Departure_Time_Since_Arrival - (60*6) ELSE 0 END) AS MH_APD_6hrs
+	,SUM(CASE WHEN MH_Flag = 1 AND EC_Departure_Time_Since_Arrival > (60*12) THEN 1 ELSE 0 END) as MH_Breach12hrs 
+	,SUM(CASE WHEN MH_Flag = 1 AND EC_Departure_Time_Since_Arrival > (60*12) THEN EC_Departure_Time_Since_Arrival - (60*12) ELSE 0 END) AS MH_APD_12hrs
+	
+	,SUM(EC_Departure_Time_Since_Arrival) as All_TotalTimeInED 
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival > (60*6) THEN 1 ELSE 0 END) as All_Breach6hrs 
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival > (60*6) THEN EC_Departure_Time_Since_Arrival - (60*6) ELSE 0 END) AS All_APD_6hrs
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival > (60*12) THEN 1 ELSE 0 END) as All_Breach12hrs 
+	,SUM(CASE WHEN EC_Departure_Time_Since_Arrival > (60*12) THEN EC_Departure_Time_Since_Arrival - (60*12) ELSE 0 END) AS All_APD_12hrs
+	
+	,SUM(CASE WHEN  MH_Flag = 1 AND EC_Departure_Time_Since_Arrival >= (24*60) THEN 1 ELSE 0 END) as MH_24hrs_breach
+	,SUM(CASE WHEN  EC_Departure_Time_Since_Arrival >= (24*60) THEN 1 ELSE 0 END) as All_24hrs_breach
+
+INTO MHDInternal.Temp_UEC_ECDS_Agg
+
+FROM MHDInternal.Temp_UEC_ECDS_Sites 
+
+WHERE Region_Name <> 'WALES REGION' 
+
+GROUP BY MonthYear, Der_Provider_Site_Code_cleaned, Der_Provider_Site_Name_cleaned, Der_Provider_Code, Der_Provider_Name, CCGCode, [CCG name], STPCode, [STP name], Region_Code, Region_Name, AgeCat
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ADD RELEVANT DENOMINATORS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_UEC_ECDS_Denoms') IS NOT NULL
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Denoms
+
+SELECT 
+	MonthYear
+	,Der_Provider_Site_Code_cleaned
+	,Der_Provider_Site_Name_cleaned
+	,Der_Provider_Code
+	,Der_Provider_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,Region_Code
+	,Region_Name
+	,AgeCat
+	,CAST(ED_Attendances AS BIGINT) AS ED_Attendances
+	,CAST(All_attendances_trimmed AS BIGINT) AS All_attendances --- to be used as denom for ALL mean time, % over 6hrs, % over 12hrs
+	,CAST(Val_ChiefComplaint AS BIGINT) AS Val_ChiefComplaint
+	,CAST(Val_Diagnosis AS BIGINT) AS Val_Diagnosis
+	,CAST(Val_InjuryIntent AS BIGINT) AS Val_InjuryIntent
+	,CAST(MH_attendances AS BIGINT) AS MH_attendances
+	,CAST(SelfHarm_Attendances AS BIGINT) AS SelfHarm_Attendances
+	,CAST(MH_TotalTimeInED as BIGINT) AS MH_TotalTimeInED
+	,CAST(MH_Breach6hrs as BIGINT) AS MH_Breach6hrs
+	,CAST(MH_Breach12hrs as BIGINT) AS MH_Breach12hrs
+	,CAST(MH_24hrs_breach as BIGINT) AS MH_24hrs_breach
+	,CAST(All_Breach6hrs as BIGINT) AS All_Breach6hrs
+	,CAST(All_Breach12hrs as BIGINT) AS All_Breach12hrs
+	,CAST(All_24hrs_breach as BIGINT) AS All_24hrs_breach 
+	,CAST(MH_APD_6hrs as BIGINT) as MH_APD_6hrs
+	,CAST(MH_APD_12hrs as BIGINT) as MH_APD_12hrs
+	,CAST(All_APD_6hrs as BIGINT) as All_APD_6hrs
+	,CAST(All_APD_12hrs as BIGINT) as All_APD_12hrs
+	,CAST(ED_Attendances as BIGINT) AS Denom_all_attendances --- for % of MH attendances, % of self harm, % chief complaint, % diagnosis
+	,CAST(MH_attendances as BIGINT) AS MH_attendances2 -- NEW DENOMINATOR FOR MH BREACHES 
+	,CAST(InjuryFlag as BIGINT) AS Denom_InjuryFlag ---- for % injury intent
+	,CAST(MH_Breach6hrs as BIGINT) AS Denom_MH_Breach6hrs --- for MH 6hr APD
+	,CAST(MH_Breach12hrs as BIGINT) AS Denom_MH_Breach12hrs --- for MH 12hr APD
+	,CAST(All_Breach6hrs as BIGINT) AS Denom_All_Breach6hrs --- for all 6hr APD 
+	,CAST(All_Breach12hrs as BIGINT) AS Denom_All_Breach12hrs --- for all 12hr APD
+	,CAST(All_Breach12hrs as BIGINT) AS All_Breach12hrs2
+
+INTO MHDInternal.Temp_UEC_ECDS_Denoms
+
+FROM MHDInternal.Temp_UEC_ECDS_Agg a
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOT FOR FINAL OUTPUT 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_UEC_ECDS_Output') IS NOT NULL
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Output
+ 
+SELECT 
+	MonthYear
+	,Der_Provider_Site_Code_cleaned
+	,Der_Provider_Site_Name_cleaned
+	,Der_Provider_Code
+	,Der_Provider_Name
+	,CCGCode
+	,[CCG name]
+	,STPCode
+	,[STP name]
+	,Region_Code
+	,Region_Name
+	,AgeCat
+	,MeasureName 
+	,MeasureValue 
+	,CASE 
+		WHEN MeasureName IN ('MH_attendances','SelfHarm_Attendances','Val_ChiefComplaint','Val_Diagnosis','All_Breach12hrs') THEN Denom_all_attendances 
+		WHEN MeasureName = 'Val_InjuryIntent' THEN Denom_InjuryFlag
+		WHEN MeasureName IN ('MH_TotalTimeinED','MH_Breach6hrs','MH_Breach12hrs','MH_24hrs_breach') THEN MH_attendances2 
+		WHEN MeasureName = 'MH_APD_6hrs' THEN Denom_MH_Breach6hrs
+		WHEN MeasureName = 'MH_APD_12hrs' THEN Denom_MH_Breach12hrs
+	END as Denominator 
+	,CASE 
+		WHEN MeasureName = 'MH_Breach6hrs' THEN All_Breach6hrs 
+		WHEN MeasureName = 'MH_Breach12hrs' THEN All_Breach12hrs2 
+		WHEN MeasureName = 'MH_24hrs_breach' THEN All_24hrs_breach 
+		WHEN MeasureName = 'MH_APD_6hrs' THEN All_APD_6hrs 
+		WHEN MeasureName = 'MH_APD_12hrs' THEN All_APD_12hrs 
+	END AS MeasureValue_alt
+	,CASE 
+		WHEN MeasureName = 'MH_Breach6hrs' THEN Denom_all_attendances 
+		WHEN MeasureName = 'MH_Breach12hrs' THEN Denom_all_attendances 
+		WHEN MeasureName = 'MH_24hrs_breach' THEN Denom_all_attendances 
+		WHEN MeasureName = 'MH_APD_6hrs' THEN Denom_All_Breach6hrs 
+		WHEN MeasureName = 'MH_APD_12hrs' THEN Denom_All_Breach12hrs 
+	END AS Denominator_alt
+	
+INTO MHDInternal.Temp_UEC_ECDS_Output
+
+FROM MHDInternal.Temp_UEC_ECDS_Denoms 
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(ED_Attendances, MH_attendances, SelfHarm_Attendances, Val_ChiefComplaint, Val_Diagnosis, All_Breach12hrs,
+		Val_InjuryIntent,
+		--MH_TotalTimeinED, 
+		MH_Breach6hrs, MH_Breach12hrs, MH_24hrs_breach, 
+		MH_APD_6hrs,
+		MH_APD_12hrs)) u 
+
+
+
+--- Delete last year of data from existing table 
+DELETE FROM MHDInternal.Dashboard_UEC_ECDS  WHERE MonthYear BETWEEN @StartDate AND @EndDate
+
+--- Insert updated data 
+INSERT INTO MHDInternal.Dashboard_UEC_ECDS 
+SELECT * FROM MHDInternal.Temp_UEC_ECDS_Output
+
+
+----DROP TABLES
+DROP TABLE MHDInternal.Temp_UEC_ECDS_ECDS
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Sites
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Agg
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Denoms
+DROP TABLE MHDInternal.Temp_UEC_ECDS_Output
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO [MHDInternal].[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'UECMH ECDS End' AS Step,
+	GETDATE() AS [TimeStamp]
