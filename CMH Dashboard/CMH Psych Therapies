@@ -1,0 +1,927 @@
+/*>>>>>>>>>>>>>>>>>>
+
+CODE TO GENERATE PSYCH THERAPY ACCESS EXTRACT
+V1 CREATED BY LOUISE SHUTTLEWORTH 04.01.24 
+MIGRATED TO UDAL 31.01.24
+
+>>>>>>>>>>>>>>>>>>>>*/	
+
+----SET VARIABLES
+
+DECLARE @EndRP INT
+
+SET @EndRP	= (SELECT UniqMonthID
+FROM MHDInternal.PreProc_Header
+WHERE Der_MostRecentFlag = 'P')
+
+DECLARE @StartRP INT
+SET @StartRP = 1429 -- Apr 19 
+
+DECLARE @RPStartDate DATE
+
+SET @RPStartDate = '2019-04-01' -- Apr 19 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'CMH Psych Therapies Report Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+GET CCMH REFERRALS
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+	
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_AccessRefs') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_AccessRefs	
+	
+SELECT DISTINCT
+	r.ReportingPeriodEndDate
+	,r.UniqMonthID
+	,r.Der_FY
+	,r.UniqServReqID
+	,r.Person_ID
+	,r.RecordNumber
+	,r.OrgIDProv
+	,p.Organisation_Name AS [Provider name]
+	,CASE 
+		WHEN r.Der_SubICBCode IN ('NONC','','UNK', 'X98') THEN 'Missing / Invalid' 
+		ELSE COALESCE(cc.New_Code,r.Der_SubICBCode, 'Missing / Invalid') 
+		END AS [CCG code]
+	,COALESCE(c.Organisation_Name,'Missing / Invalid') AS [CCG name]
+	,COALESCE(c.STP_Code,'Missing / Invalid') AS [STP code]
+	,COALESCE(c.STP_Name,'Missing / Invalid') AS [STP name]
+	,COALESCE(c.Region_Code,'Missing / Invalid') AS [Region code]
+	,COALESCE(c.Region_Name,'Missing / Invalid') AS [Region name]
+
+INTO MHDInternal.Temp_CMHPT_AccessRefs
+	
+FROM MHDInternal.PreProc_Referral r 	
+
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON r.Der_SubICBCode = cc.Org_Code
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON COALESCE(cc.New_Code,r.Der_SubICBCode) = c.Organisation_Code
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p ON r.OrgIDProv = p.Organisation_Code
+
+WHERE 
+	r.UniqMonthID BETWEEN @StartRP AND @EndRP	
+	AND r.AgeServReferRecDate >= 18 	
+	AND r.ServTeamTypeRefToMH IN ('A05','A06','A08','A09','A12','A13','A16','C03','C10') -- Core Community Teams 
+	AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL OR r.LADistrictAuth = '') 	
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DELETE REFERRALS TO INPATIENT SERVICES FROM Temp_CMHPT_AccessRefs AND Temp_CMHPT_Int
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DELETE FROM MHDInternal.Temp_CMHPT_AccessRefs WHERE CONCAT(Person_ID,UniqServReqID,Der_FY) IN (SELECT CONCAT(Person_ID,UniqServReqID,Der_FY) FROM MHDInternal.PreProc_Inpatients) 	
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+GET COUNT OF EACH INTERVENTION BY REFERRAL AND MONTH, ASSOCIATED WITH CMH REFERRALS
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_Int
+
+SELECT 
+	r.Person_ID
+	,r.UniqServReqID
+	,r.RecordNumber
+	,r.UniqMonthID
+	,r.OrgIDProv
+	,r.[CCG code]
+	,r.[STP code]
+	,r.[Region code]
+	,r.ReportingPeriodEndDate
+	,r.Der_FY
+	,i.Der_InterventionType
+	,i.Der_SNoMEDProcCode
+	,CASE 
+		WHEN i.Der_SNoMEDProcCode = '390773006' THEN 'Cognitive analytic therapy'
+		WHEN i.Der_SNoMEDProcCode = '718026005' THEN 'Cognitive behavioral therapy for psychosis'
+		WHEN i.Der_SNoMEDProcCode = '1111811000000109' THEN 'Cognitive behavioural therapy for eating disorders'
+		WHEN i.Der_SNoMEDProcCode = '1362001000000104 ' THEN 'Group cognitive behavioural therapy for eating disorders'
+		WHEN i.Der_SNoMEDProcCode = '149451000000104' THEN 'Cognitive behavioural therapy for personality disorder'
+		WHEN i.Der_SNoMEDProcCode = '405780009' THEN 'Dialectical behavior therapy'
+		WHEN i.Der_SNoMEDProcCode = '449030000' THEN 'Eye movement desensitization and reprocessing therapy'
+		WHEN i.Der_SNoMEDProcCode = '1833221000000102' THEN 'Family intervention for bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '985451000000105' THEN 'Family intervention for psychosis'
+		WHEN i.Der_SNoMEDProcCode = '1365951000000107' THEN 'Family intervention for psychosis and bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '149591000000108' THEN 'Group cognitive and behavioural therapy for bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '1362001000000104' THEN 'Group cognitive behavioural therapy for eating disorder'
+		WHEN i.Der_SNoMEDProcCode = '1108261000000102' THEN 'Interpersonal and social rhythm therapy'
+		WHEN i.Der_SNoMEDProcCode = '1106951000000105' THEN 'Interpersonal psychotherapy for group'
+		WHEN i.Der_SNoMEDProcCode = '1323471000000102' THEN 'Maudsley Model of Anorexia Nervosa Treatment for Adults'
+		WHEN i.Der_SNoMEDProcCode = '1111681000000103' THEN 'Mentalisation based treatment'
+		WHEN i.Der_SNoMEDProcCode = '1111691000000101' THEN 'Schema focused therapy'
+		WHEN i.Der_SNoMEDProcCode = '1323451000000106' THEN 'Specialist supportive clinical management'
+		WHEN i.Der_SNoMEDProcCode = '1111671000000100' THEN 'Transference focused psychotherapy'
+		WHEN i.Der_SNoMEDProcCode = '149521000000105' THEN 'Trauma focused cognitive behavioural therapy'
+		WHEN i.Der_SNoMEDProcCode = '1323681000000103' THEN 'Eating-disorder-focused focal psychodynamic therapy'
+		WHEN i.Der_SNoMEDProcCode = '748051000000105' THEN 'Guided self-help using book'
+		WHEN i.Der_SNoMEDProcCode = '1771581000000100' THEN 'Cognitive behavioural therapy for bipolar disorder' --NOT CURRENTLY IN PRSB REF SET - SO QUERYING MANUALLY FOR NOW (WILL MOVE TO PRSB STAGING TABLE ONCE IN THE REF SET)
+
+	END AS Der_Intervention
+	,COUNT(*) AS MonthlySum --count of interventions recorded in each month 
+
+INTO MHDInternal.Temp_CMHPT_Int
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r 
+
+INNER JOIN MHDInternal.[PreProc_Interventions] i ON r.UniqServReqID = i.UniqServReqID AND r.Person_ID = i.Person_ID AND r.RecordNumber = i.RecordNumber -- JOIN ON RECORD NUMBER TOO, SO ONLY BRINGS THROUGH REFERRALS TO IN SCOPE TEAM TYPES (I.E. EXCLUDES CASES WHERE SAME REFERRAL AND PERSON ID UNDER MULTIPLE TEAM TYPES)
+
+	AND (i.Der_SNoMEDProcQual != '443390004' OR i.Der_SNoMEDProcQual IS NULL) -- to exclude refused interventions
+	
+	AND i.Der_SNoMEDProcCode IN 
+	('390773006',
+	'718026005',
+	'1111811000000109',
+	'1362001000000104',
+	'149451000000104',
+	'405780009',
+	'449030000',
+	'1833221000000102',
+	'985451000000105',
+	'1365951000000107',
+	'149591000000108',
+	'1362001000000104',
+	'1108261000000102',
+	'1106951000000105',
+	'1323471000000102',
+	'1111681000000103',
+	'1111691000000101',
+	'1323451000000106',
+	'1111671000000100',
+	'149521000000105',
+	'1323681000000103',
+	'748051000000105',
+	'1771581000000100') 
+	
+WHERE i.Der_InterventionType = 'Direct'  
+
+GROUP BY r.Person_ID,r.UniqServReqID,r.RecordNumber, r.UniqMonthID,r.OrgIDProv, r.[CCG code],r.[STP code], r.[Region code], r.ReportingPeriodEndDate, r.Der_FY, i.Der_InterventionType, i.Der_SNoMEDProcCode,
+	CASE 
+		WHEN i.Der_SNoMEDProcCode = '390773006' THEN 'Cognitive analytic therapy'
+		WHEN i.Der_SNoMEDProcCode = '718026005' THEN 'Cognitive behavioral therapy for psychosis'
+		WHEN i.Der_SNoMEDProcCode = '1111811000000109' THEN 'Cognitive behavioural therapy for eating disorders'
+		WHEN i.Der_SNoMEDProcCode = '1362001000000104 ' THEN 'Group cognitive behavioural therapy for eating disorders'
+		WHEN i.Der_SNoMEDProcCode = '149451000000104' THEN 'Cognitive behavioural therapy for personality disorder'
+		WHEN i.Der_SNoMEDProcCode = '405780009' THEN 'Dialectical behavior therapy'
+		WHEN i.Der_SNoMEDProcCode = '449030000' THEN 'Eye movement desensitization and reprocessing therapy'
+		WHEN i.Der_SNoMEDProcCode = '1833221000000102' THEN 'Family intervention for bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '985451000000105' THEN 'Family intervention for psychosis'
+		WHEN i.Der_SNoMEDProcCode = '1365951000000107' THEN 'Family intervention for psychosis and bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '149591000000108' THEN 'Group cognitive and behavioural therapy for bipolar disorder'
+		WHEN i.Der_SNoMEDProcCode = '1362001000000104' THEN 'Group cognitive behavioural therapy for eating disorder'
+		WHEN i.Der_SNoMEDProcCode = '1108261000000102' THEN 'Interpersonal and social rhythm therapy'
+		WHEN i.Der_SNoMEDProcCode = '1106951000000105' THEN 'Interpersonal psychotherapy for group'
+		WHEN i.Der_SNoMEDProcCode = '1323471000000102' THEN 'Maudsley Model of Anorexia Nervosa Treatment for Adults'
+		WHEN i.Der_SNoMEDProcCode = '1111681000000103' THEN 'Mentalisation based treatment'
+		WHEN i.Der_SNoMEDProcCode = '1111691000000101' THEN 'Schema focused therapy'
+		WHEN i.Der_SNoMEDProcCode = '1323451000000106' THEN 'Specialist supportive clinical management'
+		WHEN i.Der_SNoMEDProcCode = '1111671000000100' THEN 'Transference focused psychotherapy'
+		WHEN i.Der_SNoMEDProcCode = '149521000000105' THEN 'Trauma focused cognitive behavioural therapy'
+		WHEN i.Der_SNoMEDProcCode = '1323681000000103' THEN 'Eating-disorder-focused focal psychodynamic therapy'
+		WHEN i.Der_SNoMEDProcCode = '748051000000105' THEN 'Guided self-help using book'
+		WHEN i.Der_SNoMEDProcCode = '1771581000000100' THEN 'Cognitive behavioural therapy for bipolar disorder' --NOT CURRENTLY IN PRSB REF SET - SO QUERYING MANUALLY FOR NOW (WILL MOVE TO PRSB STAGING TABLE ONCE IN THE REF SET)
+
+	END
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - AT EACH ORGANISATIONAL LEVEL
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - ENGLAND
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int_Cumulative') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.OrgIDProv, 
+	r.[CCG code], 
+	r.[STP code], 
+	r.[Region code], 
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention,
+	SUM(a.MonthlySum) AS CumSum
+
+INTO MHDInternal.Temp_CMHPT_Int_Cumulative
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r
+
+INNER JOIN  MHDInternal.Temp_CMHPT_Int a 
+	ON a.Person_ID = r.Person_ID
+	AND r.UniqServReqID = a.UniqServReqID 
+	AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate --Up to end of referral recording reporting month - to give cumulative number of interventions 
+
+GROUP BY 
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.OrgIDProv,
+	r.[CCG code],
+	r.[STP code],
+	r.[Region code],
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - PROVIDER
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int_Cumulative_Provider') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_Provider
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.OrgIDProv, --test add in
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention,
+	SUM(a.MonthlySum) AS CumSum
+
+INTO MHDInternal.Temp_CMHPT_Int_Cumulative_Provider
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r
+
+INNER JOIN  MHDInternal.Temp_CMHPT_Int a 
+	ON a.Person_ID = r.Person_ID
+	AND r.UniqServReqID = a.UniqServReqID 
+	AND r.OrgIDProv = a.OrgIDProv
+	AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate --Up to end of referral recording reporting month - to give cumulative number of interventions 
+
+GROUP BY 
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.OrgIDProv, --test add in
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - SUB-ICB
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[CCG code],
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention,
+	SUM(a.MonthlySum) AS CumSum
+
+INTO MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r
+
+INNER JOIN  MHDInternal.Temp_CMHPT_Int a 
+	ON a.Person_ID = r.Person_ID
+	AND r.UniqServReqID = a.UniqServReqID 
+	AND r.[CCG code] = a.[CCG code] --Bring through interventions for that person, referral and CCG of res
+	AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate --Up to end of referral recording reporting month - to give cumulative number of interventions 
+
+GROUP BY 
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[CCG code],
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - ICB
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int_Cumulative_ICB') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_ICB
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[STP code], --test add in
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention,
+	SUM(a.MonthlySum) AS CumSum
+
+INTO MHDInternal.Temp_CMHPT_Int_Cumulative_ICB
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r
+
+INNER JOIN  MHDInternal.Temp_CMHPT_Int a 
+	ON a.Person_ID = r.Person_ID
+	AND r.UniqServReqID = a.UniqServReqID 
+	AND r.[STP code] = a.[STP code]
+	AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate 
+
+GROUP BY 
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[STP code], --test add in
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COUNT CUMULATIVE INTERVENTIONS PER REFERRAL - REGION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Int_Cumulative_Region') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_Region
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[Region code], 
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention,
+	SUM(a.MonthlySum) AS CumSum
+
+INTO MHDInternal.Temp_CMHPT_Int_Cumulative_Region
+
+FROM MHDInternal.Temp_CMHPT_AccessRefs r
+
+INNER JOIN  MHDInternal.Temp_CMHPT_Int a 
+	ON a.Person_ID = r.Person_ID
+	AND r.UniqServReqID = a.UniqServReqID 
+	AND r.[Region code] = a.[Region code]
+	AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate 
+
+GROUP BY 
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.[Region code], --test add in
+	a.Der_SNoMEDProcCode,
+	a.Der_Intervention
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+COMBINE WITH ROLLING CMH ACCESS METRIC 
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET CONTACTS BY REFERRAL	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_AccessRefsCont') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_AccessRefsCont
+	
+SELECT 	
+	r.UniqMonthID,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.RecordNumber,
+	r.OrgIDProv,
+	r.[CCG code],
+	r.[STP code],
+	r.[Region code],
+	COUNT(a.Der_DirectContact) AS Der_ContactCount
+	
+INTO MHDInternal.Temp_CMHPT_AccessRefsCont
+	
+FROM MHDInternal.Temp_CMHPT_AccessRefs r	
+
+LEFT JOIN MHDInternal.PreProc_Activity a ON r.RecordNumber = a.RecordNumber AND a.UniqServReqID = r.UniqServReqID AND a.Der_DirectContact = 1	
+
+GROUP BY 
+	r.UniqMonthID,
+	r.UniqServReqID,
+	r.Person_ID,
+	r.RecordNumber,
+	r.OrgIDProv,
+	r.[CCG code],
+	r.[STP code],
+	r.[Region code]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET ROLLING SECOND CONTACT COUNTS BY DUPLICATING REFERRAL OVER THE NEXT 12 MONTHS	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_Rolling') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_Rolling	
+	
+SELECT	
+	r.UniqMonthID + (ROW_NUMBER() OVER(PARTITION BY r.Person_ID, r.UniqServReqID, r.UniqMonthID ORDER BY r.UniqMonthID ASC) -1) AS Der_MonthID,
+	r.UniqMonthID,
+	r.Person_ID,
+	r.UniqServReqID,
+	r.OrgIDProv,
+	r.[CCG code],
+	r.[STP code],
+	r.[Region code],
+	r.Der_ContactCount
+	
+INTO MHDInternal.Temp_CMHPT_Rolling
+	
+FROM MHDInternal.Temp_CMHPT_AccessRefsCont r	
+	
+CROSS JOIN MHDInternal.STAGING_UniqMonthID_Ref AS m WHERE m.UniqMonthID BETWEEN r.UniqMonthID AND r.UniqMonthID + 11
+
+AND r.UniqMonthID >= 1453 --Only run for April 21 and onwards
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+AGGREGATE ACTIVITY OVER PREVIOUS 12 MONTHS	
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+	
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_RollingAct') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct
+	
+SELECT
+	r.Der_MonthID,
+	r.UniqMonthID,
+	r.Person_ID,
+	r.UniqServReqID,
+	r.OrgIDProv,
+	r.[CCG code],
+	r.[STP code],
+	r.[Region code],
+	SUM(r.Der_ContactCount) OVER (PARTITION BY r.Person_ID, r.UniqServReqID, r.Der_MonthID ORDER BY r.UniqMonthID ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) AS Der_12MonthConts
+	
+INTO MHDInternal.Temp_CMHPT_RollingAct
+	 
+FROM MHDInternal.temp_CMHPT_Rolling r	
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
+GET LIST OF PID / REFERRAL IDS THAT HAD AT LEAST 2 CONTACTS IN THE 12 MONTHS UP TO Der_MonthID
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/	
+--One row per monthID, PID, RefID, where have accessed in last 12 months
+--Use as base to join to interventions from - avoids introducing duplication see when join the exploded rolling data to the Interventions
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_RollingAct_Staging') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_Staging
+
+SELECT DISTINCT
+	Der_MonthID,
+	Person_ID, 
+	UniqServReqID,
+	OrgIDProv,
+	[CCG code],
+	[STP code],
+	[Region code]
+
+INTO MHDInternal.Temp_CMHPT_RollingAct_Staging
+
+FROM MHDInternal.Temp_CMHPT_RollingAct 
+
+WHERE Der_12MonthConts > 1 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+BRING IN PSYCHOLOGICAL THERAPIES AND COUNT 1) ONCE PER PERSON 
+AND 2) ONCE PER PERSON x THERAPY TYPE
+ALSO BRINGS THROUG TOTAL NUMBER OF CUMULATIVE INTERVENTIONS - FOR CALCULATION OF AVERAGE SESSIONS RECEIVED
+ORG LEVELS - DO NATIONALLY, AND THEN ALSO DO CUTS BY REGION, ICB, SUB-ICB AND PROVIDER? (NO DRILL DOWN CUTS) 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_RollingAct_Output') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_Output
+
+--- England time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'England' AS [Organisation type]
+	,'ENG' AS [Organisation code]
+	,'England' AS [Organisation name]
+	,COUNT(DISTINCT a.Person_ID) AS [CMH access]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Psych therapy access]
+	,SUM(i.CumSum) AS CumulativeInterventions
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing psych therapies)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+INTO MHDInternal.Temp_CMHPT_RollingAct_Output
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.Der_MonthID = i.UniqMonthID
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate
+
+
+UNION ALL
+
+--- Provider time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Provider' AS [Organisation type]
+	,a.OrgIDProv AS [Organisation code]
+	,p.Organisation_Name AS [Organisation name]
+	,COUNT(DISTINCT a.Person_ID) AS [CMH access]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Psych therapy access]
+	,SUM(i.CumSum) AS CumulativeInterventions
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing psych therapies)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_Provider i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.OrgIDProv = i.OrgIDProv AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p ON a.OrgIDProv = p.Organisation_Code
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, a.OrgIDProv, p.Organisation_Name
+
+
+UNION ALL
+
+
+--- Sub-icb time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Sub ICB' AS [Organisation type]
+	,a.[CCG code] AS [Organisation code]
+	,COALESCE(c.Organisation_Name,'Missing / Invalid') AS [Organisation name]
+	,COUNT(DISTINCT a.Person_ID) AS [CMH access]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Psych therapy access]
+	,SUM(i.CumSum) AS CumulativeInterventions
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing psych therapies)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[CCG code] = i.[CCG code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, a.[CCG code], COALESCE(c.Organisation_Name,'Missing / Invalid')
+
+
+UNION ALL
+
+
+--- ICB time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'ICB' AS [Organisation type]
+	,a.[STP code] AS [Organisation code]
+	,COALESCE(c.STP_Name,'Missing / Invalid') AS [Organisation name]
+	,COUNT(DISTINCT a.Person_ID) AS [CMH access]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Psych therapy access]
+	,SUM(i.CumSum) AS CumulativeInterventions
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing psych therapies)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_ICB i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[STP code] = i.[STP code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, a.[STP code], COALESCE(c.STP_Name,'Missing / Invalid')
+
+
+UNION ALL
+
+
+--- Region time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Region' AS [Organisation type]
+	,a.[Region code] AS [Organisation code]
+	,COALESCE(c.Region_Name,'Missing / Invalid') AS [Organisation name]
+	,COUNT(DISTINCT a.Person_ID) AS [CMH access]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Psych therapy access]
+	,SUM(i.CumSum) AS CumulativeInterventions
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing psych therapies)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_Region i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[Region code] = i.[Region code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, a.[Region code], COALESCE(c.Region_Name,'Missing / Invalid')
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+ACCESS BY THERAPY TYPE AND NUMBER OF SESSIONS DELIVERED TO THOSE ACCESSING THERAPIES
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMHPT_RollingAct_TherapyOutput') IS NOT NULL	
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_TherapyOutput
+
+--- England time series, any therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'England' AS [Organisation type]
+	,'ENG' AS [Organisation code]
+	,'England' AS [Organisation name]
+	,i.Der_SNoMEDProcCode AS [SNOMED code]
+	,i.Der_Intervention AS [Therapy type]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Number of people accessing psychological therapy] --Count of people who have had two or more sessions of each intervention within the referral
+	,SUM(i.CumSum) AS [Cumulative number of therapy interventions delivered (total)]
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing the therapy)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+INTO MHDInternal.Temp_CMHPT_RollingAct_TherapyOutput
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+INNER JOIN MHDInternal.Temp_CMHPT_Int_Cumulative i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.Der_MonthID = i.UniqMonthID
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+WHERE i.Der_Intervention IS NOT NULL --Where have had at least one intervention (reduce size of joined data)
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, i.Der_SNoMEDProcCode, i.Der_Intervention
+
+
+UNION ALL 
+
+
+--- Provider time series, by therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Provider' AS [Organisation type]
+	,a.OrgIDProv AS [Organisation code]
+	,p.Organisation_Name AS [Organisation name]
+	,i.Der_SNoMEDProcCode AS [SNOMED code]
+	,i.Der_Intervention AS [Therapy type]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Number of people accessing psychological therapy] --Count of people who have had two or more sessions of each intervention within the referral
+	,SUM(i.CumSum) AS [Cumulative number of therapy interventions delivered (total)]
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing the therapy)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_Provider i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.OrgIDProv = i.OrgIDProv AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p ON a.OrgIDProv = p.Organisation_Code
+
+WHERE i.Der_Intervention IS NOT NULL --Where have had at least one intervention (reduce size of joined data)
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate, a.OrgIDProv, p.Organisation_Name, i.Der_SNoMEDProcCode, i.Der_Intervention
+
+
+UNION ALL
+
+
+--- Sub-ICB time series, by therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Sub ICB' AS [Organisation type]
+	,a.[CCG code] AS [Organisation code]
+	,COALESCE(c.Organisation_Name,'Missing / Invalid') AS [Organisation name]
+	,i.Der_SNoMEDProcCode AS [SNOMED code]
+	,i.Der_Intervention AS [Therapy type]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Number of people accessing psychological therapy] --Count of people who have had two or more sessions of each intervention within the referral
+	,SUM(i.CumSum) AS [Cumulative number of therapy interventions delivered (total)]
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing the therapy)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[CCG code] = i.[CCG code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+WHERE i.Der_Intervention IS NOT NULL --Where have had at least one intervention (reduce size of joined data)
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate,a.[CCG code], COALESCE(c.Organisation_Name,'Missing / Invalid'), i.Der_SNoMEDProcCode, i.Der_Intervention
+
+
+UNION ALL
+
+
+--- ICB time series, by therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'ICB' AS [Organisation type]
+	,a.[STP code] AS [Organisation code]
+	,COALESCE(c.STP_Name,'Missing / Invalid') AS [Organisation name]
+	,i.Der_SNoMEDProcCode AS [SNOMED code]
+	,i.Der_Intervention AS [Therapy type]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Number of people accessing psychological therapy] --Count of people who have had two or more sessions of each intervention within the referral
+	,SUM(i.CumSum) AS [Cumulative number of therapy interventions delivered (total)]
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing the therapy)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_ICB i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[STP code] = i.[STP code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+WHERE i.Der_Intervention IS NOT NULL --Where have had at least one intervention (reduce size of joined data)
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate,a.[STP code], COALESCE(c.STP_Name,'Missing / Invalid'), i.Der_SNoMEDProcCode, i.Der_Intervention
+
+
+UNION ALL
+
+
+--- Region time series, by therapy type 
+SELECT 
+	a.Der_MonthID AS [UniqMonthID]
+	,h.ReportingPeriodEndDate
+	,'Region' AS [Organisation type]
+	,a.[Region code] AS [Organisation code]
+	,COALESCE(c.Region_Name,'Missing / Invalid') AS [Organisation name]
+	,i.Der_SNoMEDProcCode AS [SNOMED code]
+	,i.Der_Intervention AS [Therapy type]
+	,COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) AS [Number of people accessing psychological therapy] --Count of people who have had two or more sessions of each intervention within the referral
+	,SUM(i.CumSum) AS [Cumulative number of therapy interventions delivered (total)]
+	,CASE 
+		WHEN COUNT(DISTINCT(CASE WHEN i.CumSum > 1 THEN a.Person_ID ELSE NULL END)) > 0 THEN SUM(i.CumSum) 
+		ELSE 0 
+		END AS [Cumulative number of therapy interventions delivered (to those accessing the therapy)] --Of people who have had two or more sessions of each intervention within the referral, the cumulaive number of that therapy that they had received 
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_Staging a 
+
+LEFT JOIN MHDInternal.Temp_CMHPT_Int_Cumulative_Region i ON a.UniqServReqID = i.UniqServReqID AND a.Person_ID = i.Person_ID AND a.[Region code] = i.[Region code] AND a.Der_MonthID = i.UniqMonthID 
+
+INNER JOIN MHDInternal.PreProc_Header h ON a.Der_MonthID = h.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON a.[CCG code] = c.Organisation_Code
+
+WHERE i.Der_Intervention IS NOT NULL --Where have had at least one intervention (reduce size of joined data)
+
+GROUP BY a.Der_MonthID, h.ReportingPeriodEndDate,a.[Region code], COALESCE(c.Region_Name,'Missing / Invalid'), i.Der_SNoMEDProcCode, i.Der_Intervention
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+ACCESS BY THERAPY TYPE AND NUMBER OF SESSIONS DELIVERED TO THOSE ACCESSING THERAPIES - CREATE EXTRACT FOR TABLEAU DASHBOARD
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Dashboard_MH_CMHPsychTherapyAccess') IS NOT NULL	
+DROP TABLE MHDInternal.Dashboard_MH_CMHPsychTherapyAccess
+
+SELECT 
+	UniqMonthID,
+	ReportingPeriodEndDate,
+	[Organisation type],
+	[Organisation code],
+	[Organisation name],
+	'Psych therapy access' AS [Dashboard type],
+	'Access by therapy type' AS Breakdown,
+	[SNOMED code] AS [Breakdown category 1], 
+ 	[Therapy type] AS [Breakdown category 2],
+	[Number of people accessing psychological therapy] AS MeasureValue,
+	NULL AS [Denominator],
+	[Cumulative number of therapy interventions delivered (total)] AS [Cumulative interventions]
+
+INTO  MHDInternal.Dashboard_MH_CMHPsychTherapyAccess
+
+FROM MHDInternal.Temp_CMHPT_RollingAct_TherapyOutput
+
+WHERE ReportingPeriodEndDate >= '2022-04-30'
+
+
+INSERT INTO MHDInternal.Dashboard_MH_CMHPsychTherapyAccess
+
+SELECT 
+	UniqMonthID,
+	ReportingPeriodEndDate,
+	[Organisation type],
+	[Organisation code],
+	[Organisation name],
+	'Psych therapy access' AS [Dashboard type],
+	'Overall access' AS Breakdown,
+	'Psych therapy access (overall)' AS [Breakdown category 1], 
+ 	'Psych therapy access (overall)' AS [Breakdown category 2],
+	[Psych therapy access] AS MeasureValue,
+	[CMH access] AS Denominator,
+	[Cumulative number of therapy interventions delivered (to those accessing psych therapies)] AS [Cumulative interventions]
+ 
+FROM MHDInternal.Temp_CMHPT_RollingAct_Output
+
+WHERE ReportingPeriodEndDate >= '2022-04-30'
+
+
+
+
+----DROP TEMPORARY TABLES
+
+DROP TABLE MHDInternal.Temp_CMHPT_AccessRefs	
+DROP TABLE MHDInternal.Temp_CMHPT_Int
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_Provider
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_SubICB
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_ICB
+DROP TABLE MHDInternal.Temp_CMHPT_Int_Cumulative_Region
+DROP TABLE MHDInternal.Temp_CMHPT_AccessRefsCont
+DROP TABLE MHDInternal.Temp_CMHPT_Rolling	
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_Staging
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_Output
+DROP TABLE MHDInternal.Temp_CMHPT_RollingAct_TherapyOutput
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG END
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'CMH Psych Therapies Report End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
