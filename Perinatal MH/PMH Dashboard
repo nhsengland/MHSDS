@@ -1,0 +1,1787 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PERINATAL DASHBOARD 
+
+CREATED BY LOUISE SHUTTLEWORTH 25/10/23
+VERSION THAT QUERIES STRAIGHT FROM THE UNDERLYING MESH_MHSDS TABLES, RATHER THAN THE PRE-PROCESSED TABLES
+
+UPDATED BY LOUISE SHUTTLEWORTH 02/02/24 TO LINK BACK TO THE PRE-PROCESSED TABLES
+
+V6 CHANGES ADDED BY ATHIRA MANOHARAN 08/08/2024
+
+ASSET: MHSDS DATA TABLES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PERINATAL DASHBOARD 
+ASSET: MHSDS DATA TABLES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--SET VARIABLE
+
+DECLARE @EndRP INT
+DECLARE @FYStart INT
+DECLARE @StartRP INT
+DECLARE @RPEndDate DATETIME
+DECLARE @RPEndDatePerformance DATETIME
+
+SET @FYStart = 
+(SELECT MAX(UniqMonthID)
+FROM MHDInternal.PreProc_Header
+WHERE Der_FYStart = 'Y')
+
+SET @EndRP = 
+(SELECT UniqMonthID
+FROM MHDInternal.PreProc_Header
+WHERE Der_MostRecentFlag = 'P')
+
+SET @StartRP = 1429 
+
+SET @RPEndDate = (SELECT ReportingPeriodEndDate
+       FROM MHDInternal.PreProc_Header
+       WHERE UniqMonthID = @EndRP)
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+CREATE DATA FOR PERINATAL MH DASHBOARD EXTRACT
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Perinatal Report Start' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IDENTIFY REFERRALS TO PERINATAL SERVICES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_refs') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_refs
+
+SELECT DISTINCT
+	r.UniqMonthID,
+    h.Der_FY,
+    r.RecordNumber,
+    r.Person_ID,
+    r.UniqServReqID,
+    r.OrgIDProv,
+
+    r.Der_SubICBCode AS OrgIDCCGRes,
+    r.LSOA2011,
+    r.EthnicCategory,
+    r.AgeServReferRecDate,
+    r.ServDischDate,
+    r.ReferralRequestReceivedDate,
+    r.SourceOfReferralMH,
+    r.ReferRejectionDate,
+    h.ReportingPeriodStartDate,
+    h.ReportingPeriodEndDate,
+
+    --Raw gender fields - to filter in next step
+    r.GenderIDCode,
+    r.Gender,
+    r.GenderSameAtBirth,
+	r.Der_Gender
+
+INTO [MHDInternal].Temp_Perinatal_Refs
+
+FROM MHDInternal.PreProc_Referral r
+
+INNER JOIN MHDInternal.PreProc_Header h ON r.UniqMonthID = h.UniqMonthID
+
+WHERE 
+	r.UniqMonthID BETWEEN @StartRP AND @EndRP 
+	AND r.ServTeamTypeRefToMH = 'C02' -- limit to referrals to Community Perinatal MH Team type
+	AND (r.LADistrictAuth IS NULL OR r.LADistrictAuth= '' OR r.LADistrictAuth LIKE ('E%'))  -- limit to those people whose commissioner is an English organisation
+	AND 
+		(r.GenderIDCode IN ('2','3') -- Female or non-binary (including trans women) 
+		OR (r.GenderIDCode = '1' AND r.GenderSameAtBirth = 'N') --GenderID male, but gender not same as at birth
+		OR ((r.GenderIDCode IS NULL OR r.GenderIDCode = '') AND r.Gender = '2')) --Gender ID not completed at all, person stated Gender is 2
+ 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CREATE DERIVATIONS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_Perinatal_Refs_Der') IS NOT NULL
+DROP TABLE MHDInternal.Temp_Perinatal_Refs_Der
+
+SELECT 
+	CASE 
+		WHEN r.UniqMonthID = @EndRP THEN 'Performance'
+		ELSE 'Previous months' END AS SubmissionType, 
+	r.UniqMonthID,
+	r.Der_FY,
+	r.RecordNumber,
+	r.Person_ID,
+	r.UniqServReqID,
+	r.OrgIDProv,
+
+	CASE 
+		WHEN r.OrgIDCCGRes IN ('NONC','','UNK', 'X98') THEN 'Missing / Invalid' 
+		ELSE COALESCE(cc.New_Code,r.OrgIDCCGRes, 'Missing / Invalid') 
+		END AS OrgIDCCGRes,
+	r.OrgIDCCGRes AS CCGCodeRaw,
+	
+	COALESCE(c.STP_Code,'Missing / Invalid') AS STP_Code,
+	COALESCE(c.Region_Code,'Missing / Invalid') AS Region_Code,
+	r.LSOA2011,
+	d.IMD_Decile,
+	r.EthnicCategory,
+	CASE 
+		WHEN e.Category IS NULL THEN  'Missing / invalid'
+		WHEN e.Category = '' THEN 'Not known'
+		ELSE CONCAT(e.[Category],' - ',e.[Main_Description_60_Chars])
+	END AS Ethnicity,
+	r.AgeServReferRecDate,
+	r.ServDischDate,
+	r.ReferralRequestReceivedDate,
+	r.SourceOfReferralMH,
+	r.ReferRejectionDate,
+	r.ReportingPeriodStartDate,
+	r.ReportingPeriodEndDate,
+	CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL THEN 1 ELSE 0 END AS OpenReferrals,
+	CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS NewReferrals,
+	CASE WHEN r.ServDischDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate THEN 1 ELSE 0 END AS ClosedReferrals
+
+INTO  MHDInternal.Temp_Perinatal_Refs_Der 
+
+FROM  MHDInternal.Temp_Perinatal_Refs r
+
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON COALESCE(cc.New_Code, r.OrgIDCCGRes) = c.Organisation_Code
+
+LEFT JOIN [UKHF_Demography].[Domains_Of_Deprivation_By_LSOA1_1] AS d ON r.LSOA2011 = d.LSOA_Code AND d.Effective_Snapshot_Date  = '2019-12-31'
+
+LEFT JOIN [UKHD_Data_Dictionary].[Ethnic_Category_Code_SCD] e ON r.EthnicCategory = e.[Main_Code_Text] COLLATE DATABASE_DEFAULT AND e.Is_Latest = 1
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ATTENDED, F2F/VC CARE CONTACTS WITH PERINATAL MH SERVICES OVER THE REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Conts') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Conts
+
+SELECT
+	   r.UniqMonthID,
+	   r.ReportingPeriodEndDate,
+	   r.Der_FY,
+       r.Person_ID,
+       r.RecordNumber,
+       r.OrgIDProv,
+       r.OrgIDCCGRes,
+       r.UniqServReqID,
+       c.UniqCareContID,
+	   c.Der_ContactDate,
+	   c.Der_FacetoFaceContact,
+       r.STP_Code,
+       r.Region_Code
+
+INTO [MHDInternal].Temp_Perinatal_Conts
+
+FROM [MHDInternal].Temp_Perinatal_Refs_Der r
+
+INNER JOIN MHDInternal.PreProc_Activity c ON r.RecordNumber = c.RecordNumber 
+       AND r.UniqServReqID = c.UniqServReqID 
+	   AND c.Der_FaceToFaceContact IS NOT NULL
+	   AND c.UniqMonthID BETWEEN @StartRP AND @EndRP
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET CUMULATIVE ACTIVITY - FOR CASELOAD CALCULATION 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Cumulative') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Cumulative
+
+SELECT
+	r.ReportingPeriodEndDate,
+	r.UniqMonthID,
+	r.RecordNumber,
+	r.UniqServReqID,
+	r.Person_ID,
+
+	-- cumulative activity
+	MAX(c.Der_ContactDate) AS Der_LastContact,
+	SUM(c.Der_FacetoFaceContact) AS Der_CumulativeContacts
+
+INTO [MHDInternal].Temp_Perinatal_Cumulative
+
+FROM [MHDInternal].Temp_Perinatal_Refs r
+
+LEFT JOIN [MHDInternal].Temp_Perinatal_Conts c ON r.Person_ID = c.Person_ID AND r.UniqServReqID = c.UniqServReqID AND c.ReportingPeriodEndDate <= r.ReportingPeriodEndDate
+
+GROUP BY r.RecordNumber, r.UniqMonthID, r.ReportingPeriodEndDate, r.UniqServReqID, r.Person_ID
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+IDENTIFYING FIRST ACTIVITY IN THE FINANCIAL YEAR, FOR EACH PID IN EACH ORGANISATION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_contYTD') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_contYTD
+
+SELECT 
+	   c.UniqMonthID,
+       c.Person_ID,
+       c.RecordNumber,
+       c.OrgIDProv,
+       c.OrgIDCCGRes,
+       c.UniqServReqID,
+       c.UniqCareContID,
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDCCGRes, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessCCGRN', -- flags a woman's first contact of financial year at CCG level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.OrgIDProv, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRN', -- flags a woman's first contact of financial year at Provider level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessEngRN', -- flags a woman's first contact of financial year at England level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.STP_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessSTPRN', -- flags a woman's first contact of financial year at STP level
+       ROW_NUMBER () OVER(PARTITION BY c.Person_ID, c.Region_Code, c.Der_FY ORDER BY c.UniqMonthID ASC, c.Der_ContactDate ASC, c.UniqCareContID ASC) AS 'FYAccessRegionRN' -- flags a woman's first contact of financial year at Region level
+
+INTO [MHDInternal].Temp_Perinatal_contYTD
+
+FROM [MHDInternal].Temp_Perinatal_Conts c
+
+WHERE c.UniqMonthID BETWEEN @StartRP AND @EndRP -- to identify a woman's first attended, face to face contact with Perinatla services in this Financial year 
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LINK CONTACTS TO REFERRAL - ADD IN OpenReferrals DEMOGRAPHIC AND REFERRAL SOURCE FLAGS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Master') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Master
+
+SELECT DISTINCT
+		r.SubmissionType,
+		r.UniqMonthID,
+		r.Der_FY,
+		r.Person_ID,
+		r.UniqServReqID,
+		r.RecordNumber, 
+		r.OrgIDProv,
+		r.OrgIDCCGRes,
+		r.STP_Code,
+		r.Region_Code,
+
+		r.OpenReferrals,
+		r.NewReferrals,
+		r.ClosedReferrals,
+
+		--Open referrals - demographic breakdowns
+		--Deprivation flag
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.IMD_Decile IN (1,2) THEN 1 ELSE 0 END AS OpenReferrals_IMDQuintile1,
+
+		--Ethnicity flags
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('White - British','White - Irish')THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_WhiteBritishIrish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'White - Any other white background' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_OtherWhite,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Mixed - White and Black Caribbean','Mixed - White and Black African','Mixed - White and Asian','Mixed - Any other mixed background') 
+		THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_Mixed,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Asian or Asian British - Indian','Asian or Asian British - Pakistani','Asian or Asian British - Bangladeshi',
+		'Asian or Asian British - Any other Asian background') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_AsianAsianBritish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Black or Black British - Caribbean','Black or Black British - African','Black or Black British - Any other Black background') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_BlackBlackBritish,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity IN ('Other ethnic groups - Chinese','Other ethnic groups - Any other ethnic group') THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_OtherEthnicGroups,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Other ethnic groups - Not stated' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityNotStated,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Missing / invalid' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityMissingInvalid,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.Ethnicity = 'Not known' THEN 1 ELSE 0 END AS OpenReferrals_Ethnicity_EthnicityNotKnown,
+
+		--Age flags
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 16 AND 20 THEN 1 ELSE 0 END AS OpenReferrals_Age_16to20,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 21 AND 25 THEN 1 ELSE 0 END AS OpenReferrals_Age_21to25,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 26 AND 39 THEN 1 ELSE 0 END AS OpenReferrals_Age_26to39,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.AgeServReferRecDate BETWEEN 40 AND 60 THEN 1 ELSE 0 END AS OpenReferrals_Age_40Plus,
+
+		--OpenReferrals referral source flags
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS OpenReferrals_Referral_GP,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS OpenReferrals_Referral_OtherPrimaryCare,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS OpenReferrals_Referral_PrimaryCareHealthVisitor,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS OpenReferrals_Referral_PrimaryCareMaternityService,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1', 'Q2') THEN 1 ELSE 0 END AS OpenReferrals_Referral_SecondaryCare,        ----v6_changes
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS OpenReferrals_Referral_SelfReferral,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
+			THEN 1 ELSE 0 END AS OpenReferrals_Referral_OtherReferralSource,
+		CASE WHEN ((r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL) AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1', 'Q2')
+				OR r.SourceOfReferralMH IS NULL)
+			THEN 1 ELSE 0 END AS OpenReferrals_Referral_MissingInvalidReferralSource,
+
+
+		--Caseload - demographic breakdowns
+		--Caseload measures
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					THEN 1 ELSE 0 END AS [Caseload],
+		--Deprivation flag
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)	
+					AND r.IMD_Decile IN (1,2) THEN 1 ELSE 0 END AS Caseload_IMDQuintile1,
+		--Ethnicity flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('White - British','White - Irish')THEN 1 ELSE 0 END AS Caseload_Ethnicity_WhiteBritishIrish,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+				    AND r.Ethnicity = 'White - Any other white background' THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherWhite,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('Mixed - White and Black Caribbean','Mixed - White and Black African','Mixed - White and Asian','Mixed - Any other mixed background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_Mixed,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)
+					AND r.Ethnicity IN ('Asian or Asian British - Indian','Asian or Asian British - Pakistani','Asian or Asian British - Bangladeshi','Asian or Asian British - Any other Asian background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_AsianAsianBritish,	
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload) 
+					AND r.Ethnicity IN ('Black or Black British - Caribbean','Black or Black British - African','Black or Black British - Any other Black background') THEN 1 ELSE 0 END AS Caseload_Ethnicity_BlackBlackBritish,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity IN ('Other ethnic groups - Chinese','Other ethnic groups - Any other ethnic group') THEN 1 ELSE 0 END AS Caseload_Ethnicity_OtherEthnicGroups,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Other ethnic groups - Not stated' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityNotStated,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Missing / invalid' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityMissingInvalid,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.Ethnicity = 'Not known' THEN 1 ELSE 0 END AS Caseload_Ethnicity_EthnicityNotKnown,
+
+		--Age flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 16 AND 20 THEN 1 ELSE 0 END AS Caseload_Age_16to20,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 21 AND 25 THEN 1 ELSE 0 END AS Caseload_Age_21to25,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 26 AND 39 THEN 1 ELSE 0 END AS Caseload_Age_26to39,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.AgeServReferRecDate BETWEEN 40 AND 60 THEN 1 ELSE 0 END AS Caseload_Age_40Plus,
+
+		--Caseload referral source flags
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS Caseload_Referral_GP,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS Caseload_Referral_OtherPrimaryCare,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareHealthVisitor,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS Caseload_Referral_PrimaryCareMaternityService,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1', 'Q2') THEN 1 ELSE 0 END AS Caseload_Referral_SecondaryCare,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS Caseload_Referral_SelfReferral,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
+			THEN 1 ELSE 0 END AS Caseload_Referral_OtherReferralSource,
+		CASE WHEN (r.ServDischDate IS NULL OR r.ServDischDate > r.ReportingPeriodEndDate) AND r.ReferRejectionDate IS NULL --referral open at reporting month end 
+					AND cu.Der_CumulativeContacts IS NOT NULL --and has had at least one attended F2F / VC contact (i.e. is on caseload)  
+					AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1', 'Q2')
+					OR r.SourceOfReferralMH IS NULL)
+			THEN 1 ELSE 0 END AS Caseload_Referral_MissingInvalidReferralSource,
+
+		--New referrals - referral source flags
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH = 'A1' THEN 1 ELSE 0 END AS New_Referral_GP,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH = 'A3' THEN 1 ELSE 0 END AS New_Referral_OtherPrimaryCare,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH = 'A2' THEN 1 ELSE 0 END AS New_Referral_PrimaryCareHealthVisitor,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH = 'A4' THEN 1 ELSE 0 END AS New_Referral_PrimaryCareMaternityService,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH IN ('P1','H2','M9','Q1', 'Q2') THEN 1 ELSE 0 END AS New_Referral_SecondaryCare,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH IN ('B1','B2') THEN 1 ELSE 0 END AS New_Referral_SelfReferral,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND r.SourceOfReferralMH IN ('D1','M6','I2','M7','H1','M3','N3','C1','G3','C2','E2','F3','I1','F1','E1','F2','G4','M2','M4','E3','E4','E5','G1','M1','C3','D2','E6','G2','M5')
+		THEN 1 ELSE 0 END AS New_Referral_OtherReferralSource,
+		CASE WHEN r.ReferralRequestReceivedDate BETWEEN r.ReportingPeriodStartDate AND r.ReportingPeriodEndDate
+			AND (r.SourceOfReferralMH NOT IN ('A1','A2','A3','A4','B1','B2','C1','C2','C3','D1','D2','E1','E2','E3','E4','E5','E6','F1','F2','F3','G1','G2','G3','G4','H1','H2','I1','I2','M1','M2','M3','M4','M5','M6','M7','M9','N3','P1','Q1', 'Q2')
+				OR r.SourceOfReferralMH IS NULL)
+			THEN 1 ELSE 0 END AS New_Referral_MissingInvalidReferralSource,
+		
+		--Access flags
+		CASE WHEN c1.Contacts >0 THEN 1 ELSE NULL END AS AttendedContact,
+		CASE WHEN c2.FYAccessRN = 1 THEN 1 ELSE NULL END AS InMonthAccess,
+		CASE WHEN c2.FYAccessCCGRN = 1 THEN 1 ELSE NULL END AS InMonthAccessCCG,
+		CASE WHEN c2.FYAccessSTPRN = 1 THEN 1 ELSE NULL END AS InMonthAccessSTP,
+		CASE WHEN c2.FYAccessRegionRN = 1 THEN 1 ELSE NULL END AS InMonthAccessReg,
+		CASE WHEN c2.FYAccessEngRN = 1 THEN 1 ELSE NULL END AS InMonthAccessEng
+
+INTO [MHDInternal].Temp_Perinatal_master
+
+FROM [MHDInternal].Temp_Perinatal_Refs_Der r
+
+-- Bring through attended contacts in the reporting period
+LEFT JOIN 
+       (SELECT
+			 c.UniqMonthID,
+             c.RecordNumber,
+             c.UniqServReqID,
+             COUNT(c.UniqCareContID) AS Contacts
+       FROM [MHDInternal].Temp_Perinatal_Conts c
+       GROUP BY c.UniqMonthID, c.RecordNumber, c.UniqServReqID) c1
+             ON r.RecordNumber = c1.RecordNumber
+             AND r.UniqServReqID = c1.UniqServReqID
+
+-- Bring through attended contacts since the start of the financial year
+LEFT JOIN [MHDInternal].Temp_Perinatal_ContYTD c2 
+       ON r.RecordNumber = c2.RecordNumber
+       AND r.UniqServReqID = c2.UniqServReqID
+       AND (c2.FYAccessRN = 1 OR c2.FYAccessCCGRN = 1)
+
+-- Bring through cumulative attended contact dates per person / referral - used for Caseload flag
+LEFT JOIN [MHDInternal].Temp_Perinatal_Cumulative cu ON r.RecordNumber = cu.RecordNumber AND r.UniqServReqID = cu.UniqServReqID
+
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF DATES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_AllDates') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_AllDates
+
+SELECT DISTINCT
+	m.SubmissionType,
+	m.UniqMonthID,
+	CAST (d.ReportingPeriodEndDate AS datetime) AS ReportingPeriodEndDate,
+	d.Der_FY
+
+INTO [MHDInternal].Temp_Perinatal_AllDates
+
+FROM [MHDInternal].Temp_Perinatal_master m
+
+LEFT JOIN MHDInternal.PreProc_Header AS d ON m.UniqMonthID = d.UniqMonthID
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET DISTINCT LIST OF PROVIDER AND COMMISSIONER COMBINATIONS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_AllOrgs') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_AllOrgs
+
+SELECT DISTINCT
+	OrgIDProv,
+	OrgIDCCGRes,
+	STP_Code,
+	Region_Code
+
+INTO [MHDInternal].Temp_Perinatal_AllOrgs
+
+FROM [MHDInternal].Temp_Perinatal_master
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE LIST OF DATES AND ORGS TO MAKE SURE ALL MONTHS ARE REPORTED AGAINST - PADDING FOR BASE MASTER
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Base') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Base
+
+SELECT
+	d.SubmissionType,
+	d.UniqMonthID,
+	d.ReportingPeriodEndDate,
+	d.Der_FY,
+	o.OrgIDProv,
+	o.OrgIDCCGRes,
+	o.STP_Code,
+	o.Region_Code
+
+INTO [MHDInternal].Temp_Perinatal_Base
+
+FROM [MHDInternal].Temp_Perinatal_AllDates d, [MHDInternal].Temp_Perinatal_AllOrgs o
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ASSIGN A VALUE TO EACH MONTH IN PADDED BASE TABLE, FOR EACH PROVIDER/CCG COMBINATION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_BaseMaster') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_BaseMaster
+
+SELECT DISTINCT
+	b.SubmissionType,
+	b.UniqMonthID,
+	b.ReportingPeriodEndDate,
+	b.Der_FY,
+	b.OrgIDProv,
+	p.Organisation_Name AS [Provider name],
+	b.OrgIDCCGRes,
+	COALESCE(h.Organisation_Name,'Missing / Invalid') AS [CCG name],
+	b.STP_Code,
+	COALESCE(h.STP_Name,'Missing / Invalid') AS [STP name],	
+	b.Region_Code,
+	COALESCE(h.Region_Name,'Missing / Invalid') AS [Region name],
+
+	COALESCE(p.Region_Code,'Missing / Invalid') AS [Provider region code],
+	COALESCE(p.Region_Name,'Missing / Invalid') AS [Provider region name],
+
+	-- Access flags
+	SUM(m.InMonthAccess) AS InMonthAccess,
+	SUM(m.InMonthAccessCCG) AS InMonthAccessCCG,
+	SUM(m.InMonthAccessSTP) AS InMonthAccessSTP,
+	SUM(m.InMonthAccessReg) AS InMonthAccessReg,
+	SUM(m.InMonthAccessEng) AS InMonthAccessEng,
+
+	--Open Referrals
+	--Deprivation flag
+	SUM(m.OpenReferrals_IMDQuintile1) AS [Open Referrals in IMD Quintile 1],
+
+	-- Ethnicity flags
+	SUM(m.OpenReferrals_Ethnicity_WhiteBritishIrish) AS [Open Referrals ethnicity- White British or Irish],
+	SUM(m.OpenReferrals_Ethnicity_OtherWhite) AS [Open Referrals ethnicity - Other White],
+	SUM(m.OpenReferrals_Ethnicity_Mixed) AS [Open Referrals ethnicity - Mixed],
+	SUM(m.OpenReferrals_Ethnicity_AsianAsianBritish) AS [Open Referrals ethnicity - Asian or Asian British],
+	SUM(m.OpenReferrals_Ethnicity_BlackBlackBritish) AS [Open Referrals ethnicity - Black or Black British],
+	SUM(m.OpenReferrals_Ethnicity_OtherEthnicGroups) AS [Open Referrals ethnicity - Other Ethnic Groups],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityNotStated) AS [Open Referrals ethnicity - Not stated],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityMissingInvalid) AS [Open Referrals ethnicity - Missing],
+	SUM(m.OpenReferrals_Ethnicity_EthnicityNotKnown) AS [Open Referrals ethnicity - Not known],
+
+	-- Age flags
+	SUM(m.OpenReferrals_Age_16to20) AS [Open Referrals aged 16 to 20],
+	SUM(m.OpenReferrals_Age_21to25) AS [Open Referrals aged 21 to 25],
+	SUM(m.OpenReferrals_Age_26to39) AS [Open Referrals aged 26 to 39],
+	SUM(m.OpenReferrals_Age_40Plus) AS [Open Referrals aged 40 plus],
+
+	-- Open Referrals flags
+	SUM(m.OpenReferrals) AS [Open Referrals total],
+	SUM(m.OpenReferrals) AS [Open Referrals total 2],	-- duplicate measures for denominator in tableau
+	SUM(m.NewReferrals) AS [New referrals],
+	SUM(m.NewReferrals) AS [New referrals 2], -- duplicate measures for denominator in tableau
+	SUM(m.ClosedReferrals) AS [Closed referrals],
+
+	-- Open Referrals referral source flags
+	SUM(m.OpenReferrals_Referral_GP) AS [Open Referrals referred from GP],
+	SUM(m.OpenReferrals_Referral_OtherPrimaryCare) AS [Open Referrals referred from Other primary care],
+	SUM(m.OpenReferrals_Referral_PrimaryCareHealthVisitor) AS [Open Referrals referred from Primary care health visitor],
+	SUM(m.OpenReferrals_Referral_PrimaryCareMaternityService) AS [Open Referrals referred from Primary care Maternity service],
+	SUM(m.OpenReferrals_Referral_SecondaryCare) AS [Open Referrals referred from Secondary care],
+	SUM(m.OpenReferrals_Referral_SelfReferral) AS [Open Referrals referred from Self referral],
+	SUM(m.OpenReferrals_Referral_OtherReferralSource) AS [Open Referrals referred from Other referral sources],
+	SUM(m.OpenReferrals_Referral_MissingInvalidReferralSource) AS [Open Referrals referred from Missing or Invalid sources],
+
+	-- New referrals referral source flags
+	SUM(m.New_Referral_GP) AS [New Referrals from GP],
+	SUM(m.New_Referral_OtherPrimaryCare) AS [New Referrals from Other primary care],
+	SUM(m.New_Referral_PrimaryCareHealthVisitor) AS [New Referrals from Primary care health visitor],
+	SUM(m.New_Referral_PrimaryCareMaternityService) AS [New Referrals from Primary care Maternity service],
+	SUM(m.New_Referral_SecondaryCare) AS [New Referrals from Secondary care],
+	SUM(m.New_Referral_SelfReferral) AS [New Referrals from Self referral],
+	SUM(m.New_Referral_OtherReferralSource) AS [New Referrals from Other referral sources],
+	SUM(m.New_Referral_MissingInvalidReferralSource) AS [New Referrals from Missing or Invalid sources],
+
+	--Caseload
+	--Deprivation flag
+	SUM(m.Caseload_IMDQuintile1) AS [Caseload in IMD Quintile 1],
+
+	-- Ethnicity flags
+	SUM(m.Caseload_Ethnicity_WhiteBritishIrish) AS [Caseload ethnicity- White British or Irish],
+	SUM(m.Caseload_Ethnicity_OtherWhite) AS [Caseload ethnicity - Other White],
+	SUM(m.Caseload_Ethnicity_Mixed) AS [Caseload ethnicity - Mixed],
+	SUM(m.Caseload_Ethnicity_AsianAsianBritish) AS [Caseload ethnicity - Asian or Asian British],
+	SUM(m.Caseload_Ethnicity_BlackBlackBritish) AS [Caseload ethnicity - Black or Black British],
+	SUM(m.Caseload_Ethnicity_OtherEthnicGroups) AS [Caseload ethnicity - Other Ethnic Groups],
+	SUM(m.Caseload_Ethnicity_EthnicityNotStated) AS [Caseload ethnicity - Not stated],
+	SUM(m.Caseload_Ethnicity_EthnicityMissingInvalid) AS [Caseload ethnicity - Missing],
+	SUM(m.Caseload_Ethnicity_EthnicityNotKnown) AS [Caseload ethnicity - Not known],
+
+	-- Age flags
+	SUM(m.Caseload_Age_16to20) AS [Caseload aged 16 to 20],
+	SUM(m.Caseload_Age_21to25) AS [Caseload aged 21 to 25],
+	SUM(m.Caseload_Age_26to39) AS [Caseload aged 26 to 39],
+	SUM(m.Caseload_Age_40Plus) AS [Caseload aged 40 plus],
+
+	-- Caseload flags
+	SUM(m.Caseload) AS [Caseload total],
+	SUM(m.Caseload) AS [Caseload total 2],	
+
+	-- Caseload referral source flags
+	SUM(m.Caseload_Referral_GP) AS [Caseload referred from GP],
+	SUM(m.Caseload_Referral_OtherPrimaryCare) AS [Caseload referred from Other primary care],
+	SUM(m.Caseload_Referral_PrimaryCareHealthVisitor) AS [Caseload referred from Primary care health visitor],
+	SUM(m.Caseload_Referral_PrimaryCareMaternityService) AS [Caseload referred from Primary care Maternity service],
+	SUM(m.Caseload_Referral_SecondaryCare) AS [Caseload referred from Secondary care],
+	SUM(m.Caseload_Referral_SelfReferral) AS [Caseload referred from Self referral],
+	SUM(m.Caseload_Referral_OtherReferralSource) AS [Caseload referred from Other referral sources],
+	SUM(m.Caseload_Referral_MissingInvalidReferralSource) AS [Caseload referred from Missing or Invalid sources]
+
+INTO [MHDInternal].Temp_Perinatal_BaseMaster
+
+FROM [MHDInternal].Temp_Perinatal_Base b 
+
+LEFT JOIN [MHDInternal].Temp_Perinatal_master m ON b.OrgIDProv = m.OrgIDProv AND b.OrgIDCCGRes = m.OrgIDCCGRes AND b.UniqMonthID = m.UniqMonthID
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p ON b.OrgIDProv = p.Organisation_Code
+
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON b.OrgIDCCGRes = cc.Org_Code 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies h ON COALESCE(cc.New_Code,b.OrgIDCCGRes) = h.Organisation_Code
+
+GROUP BY 
+	b.SubmissionType,
+	b.ReportingPeriodEndDate,
+	b.Der_FY,
+	b.UniqMonthID,
+	b.OrgIDProv,
+	p.Organisation_Name,
+	b.OrgIDCCGRes,
+	COALESCE(h.Organisation_Name,'Missing / Invalid'),
+	b.STP_Code,
+	COALESCE(h.STP_Name,'Missing / Invalid'),	
+	b.Region_Code,
+	COALESCE(h.Region_Name,'Missing / Invalid'),
+	COALESCE(p.Region_Code,'Missing / Invalid'),
+	COALESCE(p.Region_Name,'Missing / Invalid')
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+MONTHLY ACTIVITY EXTRACT
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+
+	SELECT
+		ReportingPeriodEndDate,
+		SubmissionType,
+		UniqMonthID,
+		Der_FY,
+		OrgIDProv,
+		[Provider name],		
+		OrgIDCCGRes,
+		[CCG name],
+		STP_Code,
+		[STP name],
+		Region_Code,
+		[Region name],
+		[Provider region name],
+		CASE 
+			WHEN MeasureName LIKE 'Open Referrals%' THEN 'Open Referrals'
+			WHEN MeasureName LIKE 'Caseload%' THEN 'Caseload'
+			ELSE MeasureName END 
+			AS Category1,
+			
+		CASE		
+			WHEN MeasureName IN 
+			('Open Referrals ethnicity- White British or Irish','Open Referrals ethnicity - Other White','Open Referrals ethnicity - Mixed',
+			'Open Referrals ethnicity - Asian or Asian British','Open Referrals ethnicity - Black or Black British','Open Referrals ethnicity - Other Ethnic Groups',
+			'Open Referrals ethnicity - Not stated','Open Referrals ethnicity - Missing','Open Referrals ethnicity - Not known') 
+			THEN 'Ethnicity'
+			
+			WHEN MeasureName IN 
+			('Open Referrals aged 16 to 20', 'Open Referrals aged 21 to 25','Open Referrals aged 26 to 39','Open Referrals aged 40 plus') 
+			THEN 'Open Referrals age'
+			
+			WHEN MeasureName IN 
+			('Open Referrals referred from GP','Open Referrals referred from Other primary care','Open Referrals referred from Primary care health visitor','Open Referrals referred from Primary care Maternity service',
+			'Open Referrals referred from Secondary care','Open Referrals referred from Self referral','Open Referrals referred from Other referral sources','Open Referrals referred from Missing or Invalid sources') 
+			THEN 'Open Referrals referral source'
+			
+			WHEN MeasureName IN 
+			('New Referrals from GP','New Referrals from Other primary care','New Referrals from Primary care health visitor','New Referrals from Primary care Maternity service','New Referrals from Secondary care',
+			'New Referrals from Self referral','New Referrals from Other referral sources','New Referrals from Missing or Invalid sources') 
+			THEN 'New referrals referral source'
+		
+			WHEN MeasureName IN 
+			('Caseload ethnicity- White British or Irish','Caseload ethnicity - Other White','Caseload ethnicity - Mixed',
+			'Caseload ethnicity - Asian or Asian British','Caseload ethnicity - Black or Black British','Caseload ethnicity - Other Ethnic Groups',
+			'Caseload ethnicity - Not stated','Caseload ethnicity - Missing','Caseload ethnicity - Not known') 
+			THEN 'Ethnicity'
+			
+			WHEN MeasureName IN 
+			('Caseload aged 16 to 20', 'Caseload aged 21 to 25','Caseload aged 26 to 39','Caseload aged 40 plus') 
+			THEN 'Caseload age'
+			
+			WHEN MeasureName IN 
+			('Caseload referred from GP','Caseload referred from Other primary care','Caseload referred from Primary care health visitor','Caseload referred from Primary care Maternity service',
+			'Caseload referred from Secondary care','Caseload referred from Self referral','Caseload referred from Other referral sources','Caseload referred from Missing or Invalid sources') 
+			THEN 'Caseload referral source'
+
+			ELSE MeasureName END AS Categories,
+
+		MeasureName,
+		MeasureValue,
+
+		CASE 
+			WHEN MeasureName IN 
+			('Open Referrals ethnicity- White British or Irish','Open Referrals ethnicity - Other White','Open Referrals ethnicity - Mixed',
+			'Open Referrals ethnicity - Asian or Asian British','Open Referrals ethnicity - Black or Black British', 'Open Referrals ethnicity - Other Ethnic Groups','Open Referrals ethnicity - Not stated','Open Referrals ethnicity - Missing','Open Referrals ethnicity - Not known',
+			'Open Referrals aged 16 to 20', 'Open Referrals aged 21 to 25','Open Referrals aged 26 to 39','Open Referrals aged 40 plus',
+			'Open Referrals referred from GP','Open Referrals referred from Other primary care','Open Referrals referred from Primary care health visitor','Open Referrals referred from Primary care Maternity service',
+			'Open Referrals referred from Secondary care','Open Referrals referred from Self referral','Open Referrals referred from Other referral sources','Open Referrals referred from Missing or Invalid sources',
+			'Open Referrals in IMD Quintile 1') 
+			THEN [Open Referrals total 2]
+
+			WHEN MeasureName IN 
+			('Caseload ethnicity- White British or Irish','Caseload ethnicity - Other White','Caseload ethnicity - Mixed',
+			'Caseload ethnicity - Asian or Asian British','Caseload ethnicity - Black or Black British', 'Caseload ethnicity - Other Ethnic Groups','Caseload ethnicity - Not stated','Caseload ethnicity - Missing','Caseload ethnicity - Not known',
+			'Caseload aged 16 to 20', 'Caseload aged 21 to 25','Caseload aged 26 to 39','Caseload aged 40 plus',
+			'Caseload referred from GP','Caseload referred from Other primary care','Caseload referred from Primary care health visitor','Caseload referred from Primary care Maternity service',
+			'Caseload referred from Secondary care','Caseload referred from Self referral','Caseload referred from Other referral sources','Caseload referred from Missing or Invalid sources',
+			'Caseload in IMD Quintile 1') 
+			THEN [Caseload total 2]
+		
+			WHEN MeasureName IN 
+			('New Referrals from GP','New Referrals from Other primary care','New Referrals from Primary care health visitor','New Referrals from Primary care Maternity service','New Referrals from Secondary care',
+			'New Referrals from Self referral','New Referrals from Other referral sources','New Referrals from Missing or Invalid sources') 
+			THEN [New referrals 2]
+			END AS Denominator -- bring through denominator for each category
+	
+	INTO [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	FROM [MHDInternal].Temp_Perinatal_BaseMaster
+
+	UNPIVOT (MeasureValue FOR MeasureName IN(
+				[Open Referrals in IMD Quintile 1],
+				[Open Referrals ethnicity- White British or Irish],
+				[Open Referrals ethnicity - Other White],
+				[Open Referrals ethnicity - Mixed],
+				[Open Referrals ethnicity - Asian or Asian British],
+				[Open Referrals ethnicity - Black or Black British],
+				[Open Referrals ethnicity - Other Ethnic Groups],
+				[Open Referrals ethnicity - Not stated],
+				[Open Referrals ethnicity - Missing],
+				[Open Referrals ethnicity - Not known],
+				[Open Referrals aged 16 to 20],
+				[Open Referrals aged 21 to 25],
+				[Open Referrals aged 26 to 39],
+				[Open Referrals aged 40 plus],
+				[Open Referrals total],
+				[New referrals],
+				[Closed referrals],
+				[Open Referrals referred from GP],
+				[Open Referrals referred from Other primary care],
+				[Open Referrals referred from Primary care health visitor],
+				[Open Referrals referred from Primary care Maternity service],
+				[Open Referrals referred from Secondary care],
+				[Open Referrals referred from Self referral],
+				[Open Referrals referred from Other referral sources],
+				[Open Referrals referred from Missing or Invalid sources],
+				[New Referrals from GP],
+				[New Referrals from Other primary care],
+				[New Referrals from Primary care health visitor],
+				[New Referrals from Primary care Maternity service],
+				[New Referrals from Secondary care],
+				[New Referrals from Self referral],
+				[New Referrals from Other referral sources],
+				[New Referrals from Missing or Invalid sources],
+				[Caseload total],
+				[Caseload in IMD Quintile 1],
+				[Caseload ethnicity- White British or Irish],
+				[Caseload ethnicity - Other White],
+				[Caseload ethnicity - Mixed],
+				[Caseload ethnicity - Asian or Asian British],
+				[Caseload ethnicity - Black or Black British],
+				[Caseload ethnicity - Other Ethnic Groups],
+				[Caseload ethnicity - Not stated],
+				[Caseload ethnicity - Missing],
+				[Caseload ethnicity - Not known],
+				[Caseload aged 16 to 20],
+				[Caseload aged 21 to 25],
+				[Caseload aged 26 to 39],
+				[Caseload aged 40 plus],
+				[Caseload referred from GP],
+				[Caseload referred from Other primary care],
+				[Caseload referred from Primary care health visitor],
+				[Caseload referred from Primary care Maternity service],
+				[Caseload referred from Secondary care],
+				[Caseload referred from Self referral],
+				[Caseload referred from Other referral sources],
+				[Caseload referred from Missing or Invalid sources])) U
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+ACCESS EXTRACT 
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CALCULATES MONTHLY YEAR TO DATE ACCESS AT PROVIDER TO ENGLAND LEVELS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_YTD') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_YTD
+
+
+-- Provider Year to Date access 
+SELECT DISTINCT
+	b.SubmissionType,
+	b.ReportingPeriodEndDate,
+	b.UniqMonthID,
+	b.Der_FY,
+	'Provider' AS OrganisationType,
+	b.OrgIDProv AS OrganisationCode,
+	b.[Provider name] AS OrganisationName,
+	SUM(ISNULL(b.InMonthAccess,0)) OVER (PARTITION BY b.OrgIDProv, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
+	b.[Provider region name] AS [Geographic benchmarking group]
+	 
+INTO [MHDInternal].Temp_Perinatal_YTD
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster AS b
+
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
+
+
+UNION ALL
+
+
+-- CCG Year to Date access
+SELECT DISTINCT
+	b.SubmissionType,
+	b.ReportingPeriodEndDate,
+	b.UniqMonthID,
+	b.Der_FY,
+	'CCG' AS OrganisationType,
+	b.OrgIDCCGRes AS OrganisationCode,
+	b.[CCG name] AS OrganisationName,	
+	SUM(ISNULL(b.InMonthAccessCCG,0)) OVER (PARTITION BY b.OrgIDCCGRes, b.Der_FY ORDER BY B.UniqMonthID) AS [YTD Access],
+	b.[Region name] AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster AS b
+
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
+
+UNION ALL
+
+-- STP Year to Date access
+SELECT DISTINCT
+	b.SubmissionType,
+	b.ReportingPeriodEndDate,
+	b.UniqMonthID,
+	b.Der_FY,
+	'STP' AS OrganisationType,
+	b.STP_Code AS OrganisationCode,
+	b.[STP name] AS OrganisationName,
+    SUM(ISNULL(b.InMonthAccessSTP,0)) OVER (PARTITION BY b.STP_Code, b.Der_FY ORDER BY b.UniqMonthID) AS [YTD Access],
+	b.[Region name] AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster AS b
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies map ON b.OrgIDCCGRes = map.Organisation_Code
+
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
+
+
+UNION ALL
+
+-- Region Year to Date access
+SELECT DISTINCT
+	b.SubmissionType,
+	b.ReportingPeriodEndDate,
+	b.UniqMonthID,
+	b.Der_FY,
+	'Region' AS OrganisationType,
+	b.Region_Code AS OrganisationCode,
+	b.[Region name] AS OrganisationName,
+	SUM(ISNULL(b.InMonthAccessReg,0)) OVER (PARTITION BY b.Region_Code, b.Der_FY  ORDER BY b.UniqMonthID) AS [YTD Access],
+	'N/A' AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster AS b
+
+WHERE b.UniqMonthID BETWEEN @StartRP and @EndRP
+
+
+UNION ALL
+
+
+-- England Year to Date access
+SELECT DISTINCT
+	m.SubmissionType,
+	d.ReportingPeriodEndDate,
+	m.UniqMonthID,
+	m.Der_FY,
+	'England' AS OrganisationType,
+	'ENG' AS OrganisationCode,
+	'ENGLAND' AS OrganisationName,
+	SUM(ISNULL(m.InMonthAccessEng,0)) OVER (PARTITION BY m.Der_FY ORDER BY m.UniqMonthID) AS [YTD Access],
+	'N/A' AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_Master m
+
+LEFT JOIN MHDInternal.PreProc_Header AS d ON m.UniqMonthID = d.UniqMonthID
+
+WHERE m.UniqMonthID BETWEEN @StartRP and @EndRP
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+BRINGS THROUGH FYFV/LTP TARGETS MAPPED TO CURRENT ORGANISATIONAL BOUNDARIES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Targets') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Targets
+
+-- CCG targets mapped to latest boundaries
+SELECT DISTINCT	
+	t.FYear,
+	'CCG' AS OrganisationType,
+	COALESCE(cc.New_Code,t.Organisation_Code) AS OrganisationCode,
+	SUM([Target]) AS Targets
+
+INTO [MHDInternal].Temp_Perinatal_Targets
+
+FROM [MHDInternal].STAGING_MH_Perinatal_Targets_Totals t
+
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON t.Organisation_Code = cc.Org_Code
+
+WHERE t.Organisation_Type = 'CCG' 
+
+GROUP BY t.FYear, t.Organisation_Type, COALESCE(cc.New_Code,t.Organisation_Code)
+
+
+UNION ALL
+
+
+-- STP targets mapped to latest boundaries
+SELECT 
+	t.FYear,
+	'STP' AS OrganisationType,
+	map.STP_Code AS Organisation_Code,
+	SUM([Target]) AS Targets
+
+FROM [MHDInternal].STAGING_MH_Perinatal_Targets_Totals t
+	 
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON t.Organisation_Code = cc.Org_Code 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies map ON COALESCE(cc.New_Code,t.Organisation_Code) = map.Organisation_Code
+
+GROUP BY t.FYear, t.Organisation_Type, map.STP_Code
+
+
+UNION ALL
+
+
+-- Region targets mapped to latest boundaries
+SELECT 
+	t.FYear,
+	'Region' AS OrganisationType,
+	map.Region_Code AS Organisation_Code,
+	SUM([Target]) AS Targets
+
+FROM [MHDInternal].STAGING_MH_Perinatal_Targets_Totals t
+	 
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON t.Organisation_Code = cc.Org_Code 
+
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies map ON COALESCE(cc.New_Code,t.Organisation_Code) = map.Organisation_Code
+
+GROUP BY t.FYear, t.Organisation_Type, map.Region_Code
+
+
+UNION ALL
+
+
+-- England targets mapped to latest boundaries
+SELECT 
+	t.FYear,
+	'England' AS OrganisationType,
+	'ENG' AS Organisation_Code,
+	SUM([Target]) AS Targets
+
+FROM [MHDInternal].STAGING_MH_Perinatal_Targets_Totals t
+	 
+GROUP BY t.FYear, t.Organisation_Type
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DUPLICATE RECORDS ACROSS NEXT 11 MONTHS TO CALCULATE ROLIING 12 MONTH DATA - FOR CALCULATING ROLLING ACCESS PRIOR TO PUBLICATION OF NHS DIGITAL FIGURES (MARCH 2021 DATA)
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Rolling') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Rolling
+
+SELECT
+	   m.UniqMonthID + (ROW_NUMBER() OVER(PARTITION BY m.UniqServReqID, m.UniqMonthID ORDER BY m.UniqMonthID ASC) -1) AS Der_MonthID,
+	   m.UniqMonthID,
+       m.Person_ID,
+       m.UniqServReqID,
+       m.OrgIDCCGRes,
+       m.OrgIDProv,
+	   m.STP_Code,
+       m.Region_Code,
+       m.AttendedContact AS RollingAccess
+
+INTO [MHDInternal].Temp_Perinatal_Rolling
+
+FROM [MHDInternal].Temp_Perinatal_master m
+
+CROSS JOIN MHDInternal.STAGING_UniqMonthID_Ref AS n WHERE n.UniqMonthID BETWEEN m.UniqMonthID AND m.UniqMonthID + 11
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET PUBLISHED ROLLING ACCESS DATA FROM UKHF TABLES
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--IF OBJECT_ID ('MHDInternal.Temp_Perinatal_Pub') IS NOT NULL
+--DROP TABLE MHDInternal.Temp_Perinatal_Pub
+
+--SELECT
+--	s.REPORTING_PERIOD_END AS ReportingPeriodEnd,
+--	CASE 
+--		WHEN BREAKDOWN IN('CCG - Residence', 'CCG of Residence','Sub ICB of Residence') THEN 'CCG of Residence' 
+--		WHEN BREAKDOWN IN ('ICB','ICB of Residence') THEN 'STP'
+--		WHEN BREAKDOWN ='Commissioning Region' THEN 'Region'
+--	ELSE BREAKDOWN END AS OrgType,
+--	CASE WHEN BREAKDOWN = 'England' THEN 'ENG' 
+--	ELSE s.PRIMARY_LEVEL END AS [Organisation code],
+--	COALESCE(s.MEASURE_VALUE,0) AS MEASURE_VALUE
+
+--INTO MHDInternal.Temp_Perinatal_Pub
+
+--FROM  [UKHF_Mental_Health].[Monthly_MHSDS_Data1] s
+
+--WHERE MEASURE_ID = 'MHS91' AND Breakdown != 'England; Ethnicity' 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+BRINGS THROUGH ROLLING AND CALCULATED IN MONTH ACCESS TOTALS AT PROVIDER TO ENGLAND LEVELS, AND BRINGS THROUGH ONS 2016 BIRTHS FOR USE AS DENOMINATOR IN ACCESS RATE CALCULATION
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_AccessTotals') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_AccessTotals
+
+-- Provider level access, mapped to ONS E-codes for Tableau map
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.SubmissionType,
+	m.UniqMonthID,
+	m.Der_FY,
+	'Provider' AS OrganisationType,
+	m.OrgIDProv AS OrganisationCode,
+	m.[Provider name] AS OrganisationName,
+	CASE 
+		WHEN prov.Region_Code = 'Y56' THEN 'E40000003'
+		WHEN prov.Region_Code = 'Y59' THEN 'E40000005'
+		WHEN prov.Region_Code = 'Y58' THEN 'E40000006'
+		WHEN prov.Region_Code = 'Y61' THEN 'E40000007'
+		WHEN prov.Region_Code = 'Y60' THEN 'E40000008'
+		WHEN prov.Region_Code = 'Y63' THEN 'E40000009'
+		WHEN prov.Region_Code = 'Y62' THEN 'E40000010'
+	END AS nhser19cd_Prov,
+	--CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
+	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
+		NULL AS [Live births 2016],
+	NULL AS [Live births 2016 2], --duplicate for denominator in tableau
+	m.[Provider region name] AS [Geographic benchmarking group]
+
+INTO [MHDInternal].Temp_Perinatal_AccessTotals
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster m
+
+-- Rolling 12 month access counts from NHS Digital
+--LEFT JOIN  MHDInternal.Temp_Perinatal_Pub AS p ON m.OrgIDProv = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Provider'
+
+--Rolling 12 month access count calculation
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		OrgIDProv,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+	FROM [MHDInternal].Temp_Perinatal_Rolling AS m1
+	GROUP BY Der_MonthID, OrgIDProv) m1 
+	ON m.OrgIDProv = m1.OrgIDProv AND m.UniqMonthID = m1.Der_MonthID 
+
+	
+-- In month access counts
+LEFT JOIN 
+	(SELECT 
+		UniqMonthID,
+		OrgIDProv,
+		COUNT(DISTINCT CASE WHEN m2.InMonthAccess = 1 THEN m2.Person_ID END) AS InMonthAccess
+	FROM [MHDInternal].Temp_Perinatal_master AS m2
+	GROUP BY UniqMonthID, OrgIDProv) m2 
+	ON m.OrgIDProv = m2.OrgIDProv AND m.UniqMonthID = m2.UniqMonthID 
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies prov ON m.OrgIDProv = prov.Organisation_Code 
+
+
+UNION ALL
+
+
+-- CCG level acces and ONS births 
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.SubmissionType,
+	m.UniqMonthID,
+	m.Der_FY,
+	'CCG' AS OrganisationType,
+	m.OrgIDCCGRes,
+	m.[CCG name],
+	NULL AS nhser19cd_Prov,
+	--CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
+	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
+	b.[Live births 2016],
+	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
+	m.[Region name] AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster m
+
+-- Rolling 12 month access counts from NHS Digital
+--LEFT JOIN  MHDInternal.Temp_Perinatal_Pub AS p ON m.OrgIDCCGRes = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'CCG of Residence'	
+
+--Rolling 12 month access count calculation
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		OrgIDCCGRes,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+	FROM [MHDInternal].Temp_Perinatal_Rolling AS m1
+	GROUP BY Der_MonthID, OrgIDCCGRes) m1 
+
+	ON m.OrgIDCCGRes = m1.OrgIDCCGRes AND m.UniqMonthID = m1.Der_MonthID 
+
+-- In month access counts
+LEFT JOIN
+	(SELECT 
+		UniqMonthID,
+		OrgIDCCGRes,
+		COUNT(DISTINCT CASE WHEN m2.InMonthAccessCCG = 1 THEN m2.Person_ID END) AS InMonthAccess
+	FROM [MHDInternal].Temp_Perinatal_master AS m2
+	GROUP BY UniqMonthID, OrgIDCCGRes) m2 
+
+	ON m.OrgIDCCGRes = m2.OrgIDCCGRes AND m.UniqMonthID = m2.UniqMonthID 
+
+-- ONS births
+LEFT JOIN
+	(SELECT DISTINCT
+		d.UniqMonthID,
+		o.Orgtype AS OrganisationType,
+		COALESCE(cc.New_Code,o.OrgCode) AS OrganisationCode,
+		SUM(o.LiveBirths2016) AS [Live births 2016]
+
+	FROM [MHDInternal].Temp_Perinatal_AllDates d, [MHDInternal].STAGING_MH_Perinatal_ONSBirths2016 o
+
+	LEFT JOIN Internal_Reference.ComCodeChanges cc ON o.OrgCode = cc.Org_Code
+
+	WHERE o.OrgType = 'CCG' 
+
+	GROUP BY d.UniqMonthID, o.Orgtype, COALESCE(cc.New_Code,o.OrgCode)) b
+
+	ON m.OrgIDCCGRes = b.OrganisationCode AND m.UniqMonthID = b.UniqMonthID
+
+
+UNION ALL
+
+
+-- STP level access and ONS births
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.SubmissionType,
+	m.UniqMonthID,
+	m.Der_FY,
+    'STP' AS OrganisationType,
+	m.STP_Code,
+	m.[STP name],
+	NULL AS nhser19cd_Prov,
+	--CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
+	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
+	b.[Live births 2016],
+	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
+	m.[Region name] AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster m
+
+-- Rolling 12 month access counts from NHS Digital
+--LEFT JOIN  MHDInternal.Temp_Perinatal_Pub AS p ON m.STP_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'STP'
+
+-- Rolling 12 month access count calculation
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		STP_Code,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People
+	FROM [MHDInternal].Temp_Perinatal_Rolling AS m1
+	GROUP BY Der_MonthID, STP_Code) m1 
+
+	ON m.STP_Code = m1.STP_Code AND m.UniqMonthID = m1.Der_MonthID 	
+
+-- In month access counts
+LEFT JOIN
+	(SELECT 
+		UniqMonthID,
+		STP_Code,
+		COUNT(DISTINCT CASE WHEN m2.InMonthAccessSTP = 1 THEN m2.Person_ID END) AS InMonthAccess
+	FROM [MHDInternal].Temp_Perinatal_master AS m2
+	GROUP BY UniqMonthID, STP_Code) m2 
+
+	ON m.STP_Code = m2.STP_Code AND m.UniqMonthID = m2.UniqMonthID 
+
+-- ONS births
+LEFT JOIN 
+	(SELECT
+		d.UniqMonthID,
+		'STP' AS OrganisationType,
+		map.STP_Code AS OrganisationCode,
+		SUM(o.LiveBirths2016) AS [Live births 2016]
+
+	FROM [MHDInternal].Temp_Perinatal_AllDates d, [MHDInternal].STAGING_MH_Perinatal_ONSBirths2016 o
+
+	LEFT JOIN Internal_Reference.ComCodeChanges cc ON o.OrgCode = cc.Org_Code
+
+	LEFT JOIN  Reporting_UKHD_ODS.Commissioner_Hierarchies map ON COALESCE(cc.New_Code,o.OrgCode) = map.Organisation_Code
+
+	WHERE o.OrgType = 'CCG'	GROUP BY d.UniqMonthID, map.STP_Code) b
+
+	ON m.STP_Code = b.OrganisationCode AND m.UniqMonthID = b.UniqMonthID
+
+
+UNION ALL
+
+
+-- Region level access and ONS births
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.SubmissionType,
+	m.UniqMonthID,
+	m.Der_FY,
+	'Region' AS OrganisationType,
+	m.Region_Code,
+	m.[Region name],
+	NULL AS nhser19cd_Prov,
+	--CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
+	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
+	b.[Live births 2016],
+	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
+	'N/A' AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_BaseMaster m
+
+-- Rolling 12 month access counts from NHS Digital
+--LEFT JOIN  MHDInternal.Temp_Perinatal_Pub AS p ON m.Region_Code = p.[Organisation code] AND m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'Region'
+
+-- Rolling 12 month access count calculation
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		Region_Code, 
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People	
+		FROM [MHDInternal].Temp_Perinatal_Rolling AS m1
+	GROUP BY Der_MonthID, Region_Code) m1 
+
+	ON m.Region_Code = m1.Region_Code AND m.UniqMonthID = m1.Der_MonthID 
+
+-- In month access counts
+LEFT JOIN
+	(SELECT 
+		UniqMonthID,
+		Region_Code,
+		COUNT(DISTINCT CASE WHEN m2.InMonthAccessReg = 1 THEN m2.Person_ID END) AS InMonthAccess
+		FROM [MHDInternal].Temp_Perinatal_master AS m2
+	GROUP BY UniqMonthID, Region_Code) m2 
+
+	ON m.Region_Code = m2.Region_Code AND m.UniqMonthID = m2.UniqMonthID 
+
+-- ONS births
+LEFT JOIN
+	(SELECT
+		d.UniqMonthID,
+		'Region' AS OrganisationType,
+		map.Region_Code AS OrganisationCode,
+		SUM(o.LiveBirths2016) AS [Live births 2016]
+
+	FROM [MHDInternal].Temp_Perinatal_AllDates d, [MHDInternal].STAGING_MH_Perinatal_ONSBirths2016 o
+
+	LEFT JOIN Internal_Reference.ComCodeChanges cc ON o.OrgCode = cc.Org_Code
+
+	LEFT JOIN  Reporting_UKHD_ODS.Commissioner_Hierarchies map ON COALESCE(cc.New_Code,o.OrgCode) = map.Organisation_Code 
+
+	WHERE o.OrgType = 'CCG'
+
+	GROUP BY d.UniqMonthID, map.Region_Code) b
+	
+	ON m.Region_Code = b.OrganisationCode AND m.UniqMonthID = b.UniqMonthID
+
+
+UNION ALL
+
+
+-- England level access and ONS births
+SELECT DISTINCT
+	m.ReportingPeriodEndDate,
+	m.SubmissionType,
+	m.UniqMonthID,
+	m.Der_FY,
+	'England' AS OrganisationType,
+	'ENG' AS OrganisationCode,
+	'ENGLAND' AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	--CAST(ISNULL(p.MEASURE_VALUE,0) AS INT) AS Access, -- Access counts from NHS Digital
+	ISNULL(m1.Access,0) AS AccessRolling, -- Calculated Access counts
+	ISNULL(m2.InMonthAccess,0) AS InMonthAccess,
+	b.[Live births 2016], 
+	b.[Live births 2016] AS [Live births 2016 2], --duplicate for denominator in tableau
+	'N/A' AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_Base m
+
+-- Rolling 12 month access counts from NHS Digital
+--LEFT JOIN  MHDInternal.Temp_Perinatal_Pub AS p ON m.ReportingPeriodEndDate = p.ReportingPeriodEnd AND p.OrgType = 'England'
+
+-- Rolling 12 month access count calculation
+LEFT JOIN 
+	(SELECT 
+		Der_MonthID,
+		COUNT(DISTINCT CASE WHEN m1.RollingAccess = 1 THEN m1.Person_ID END) AS Access,
+		COUNT(DISTINCT m1.Person_ID) AS People
+	FROM [MHDInternal].Temp_Perinatal_Rolling AS m1
+	GROUP BY Der_MonthID) m1 
+
+	ON m.UniqMonthID = m1.Der_MonthID 
+
+-- In month access counts
+LEFT JOIN
+	(SELECT 
+		UniqMonthID,
+		COUNT(DISTINCT CASE WHEN m2.InMonthAccessEng = 1 THEN m2.Person_ID END) AS InMonthAccess
+	FROM [MHDInternal].Temp_Perinatal_master AS m2
+	GROUP BY UniqMonthID) m2 
+
+	ON m.UniqMonthID = m2.UniqMonthID 
+
+-- ONS births
+LEFT JOIN
+	(SELECT
+		d.UniqMonthID,
+		'England' AS OrganisationType,
+		'ENG' AS OrganisationCode,
+		'England' AS OrganisationName,
+		SUM(o.LiveBirths2016) AS [Live births 2016]
+
+	FROM [MHDInternal].Temp_Perinatal_AllDates d, [MHDInternal].STAGING_MH_Perinatal_ONSBirths2016 o
+
+	WHERE o.OrgType = 'CCG'
+
+	GROUP BY d.UniqMonthID) b
+	
+	ON m.UniqMonthID = b.UniqMonthID
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DQ FLAGS UP TO LATEST PERFORMANCE DATA - FOR TABLEAU DQ MAP
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear
+
+SELECT DISTINCT 
+	@RPEndDate AS ReportingPeriodEndDate,
+	'Performance' AS SubmissionType,
+	@EndRP AS UniqMonthID,
+	a.Der_FY,
+	a.OrganisationType,
+	a.OrganisationCode,
+	a.OrganisationName,
+	a.nhser19cd_Prov,
+	SUM
+		(CASE WHEN a.OrganisationCode = 'RTV' THEN 0 -- North West Boroughs closed in June - stops being flagged as a non-submitter
+		WHEN a.InMonthAccess IS NULL OR a.InMonthAccess = 0 THEN 1 
+		ELSE 0 END) AS [YTD Missed submission flag], -- Flags missed submissions since start of Financial year
+	SUM
+		(CASE WHEN a.OrganisationCode = 'RTV' THEN 0 -- North West Boroughs closed in June - stops being flagged as a non-submitter
+		WHEN a.InMonthAccess BETWEEN 1 AND 5 THEN 1 
+		ELSE 0 END) AS [YTD Suppressed submission flag], -- Flags suppressed submissions since start of Financial year
+	SUM
+		(CASE WHEN a.OrganisationCode = 'RTV' THEN 0 -- North West Boroughs closed in June - stops being flagged as a non-submitter
+		WHEN a.UniqMonthID = @EndRP AND (a.InMonthAccess IS NULL OR a.InMonthAccess = 0) THEN 1 
+		ELSE 0 END) AS [Latest performance Missed submission flag], -- Flags missed submissions in latest Performance data
+	SUM
+		(CASE WHEN a.OrganisationCode = 'RTV' THEN 0 -- North West Boroughs closed in June - stops being flagged as a non-submitter
+		WHEN a.UniqMonthID = @EndRP AND a.InMonthAccess BETWEEN 1 AND 5 THEN 1 
+		ELSE 0 END) AS [Latest performance Suppressed submission flag] -- Flags missed submissions in latest Performance data
+
+INTO [MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear
+FROM [MHDInternal].Temp_Perinatal_AccessTotals a
+
+LEFT JOIN MHDInternal.PreProc_Header AS d ON a.UniqMonthID = d.UniqMonthID
+
+WHERE a.OrganisationType = 'Provider' AND a.UniqMonthID BETWEEN @FYStart AND @EndRP
+
+GROUP BY 
+	a.Der_FY,
+	a.OrganisationType,
+	a.OrganisationCode,
+	a.OrganisationName,
+	a.nhser19cd_Prov
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOT ACCESS COUNTS FOR DASHBOARD EXTRACT
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Pivot_Access') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Access
+
+
+--Unpivot the Access measures
+SELECT DISTINCT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	OrganisationType,
+	OrganisationCode,
+	OrganisationName,
+	nhser19cd_Prov,
+	MeasureName,
+	MeasureValue,
+	--CASE WHEN MeasureName IN ('Access', 'AccessRolling') THEN [Live births 2016 2] ELSE NULL END AS [Denominator],
+	CASE WHEN MeasureName = 'AccessRolling' THEN [Live births 2016 2] ELSE NULL END AS [Denominator],
+	[Geographic benchmarking group]
+	
+INTO [MHDInternal].Temp_Perinatal_Pivot_Access 
+
+FROM [MHDInternal].Temp_Perinatal_AccessTotals 
+
+UNPIVOT 
+	(MeasureValue FOR MeasureName IN 
+		(--Access,
+		InMonthAccess,
+		AccessRolling)) U
+
+UNION ALL
+
+
+--Unpivot the YTD Access data
+SELECT DISTINCT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	OrganisationType,
+	OrganisationCode,
+	OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	MeasureValue,
+	NULL AS [Denominator],
+	[Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_YTD
+
+UNPIVOT 
+	(MeasureValue FOR MeasureName IN 
+			([YTD Access])) U
+
+
+UNION ALL
+
+
+--Unpivot the calculated provider DQ Flags 
+SELECT DISTINCT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	OrganisationType,
+	OrganisationCode,
+	OrganisationName,
+	nhser19cd_Prov,
+	MeasureName,
+	MeasureValue,
+	NULL AS [Denominator],
+	NULL AS [Geographic benchmarking group]
+
+FROM [MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear
+
+UNPIVOT 
+	(MeasureValue FOR MeasureName IN 
+			([YTD Missed submission flag],
+			[YTD Suppressed submission flag],
+			[Latest performance Missed submission flag],
+			[Latest performance Suppressed submission flag])) U
+
+
+UNION ALL
+
+
+--Sum up Open Referrals measures to organisation level for inclusion in the Data table - Provider
+SELECT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	'Provider' AS OrganisationType,
+	OrgIDProv AS OrganisationCode,
+	[Provider name] AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	SUM(MeasureValue) AS MeasureValue,
+	NULL AS [Denominator],
+	[Provider region name] AS [Geographic benchmarking group]
+
+	FROM [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
+
+	GROUP BY ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	OrgIDProv,
+	[Provider name],
+	MeasureName,
+	[Provider region name]
+
+
+UNION ALL
+
+
+--Sum up Open Referrals to organisation level for inclusion in the Data table - CCG
+--Gap - from October 2019 to May 22. Why??
+SELECT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	'CCG' AS OrganisationType,
+	OrgIDCCGRes AS OrganisationCode,
+	[CCG name] AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	SUM(MeasureValue) AS MeasureValue,
+	NULL AS [Denominator],
+	[Region name] AS [Geographic benchmarking group]
+
+	FROM [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
+
+	GROUP BY ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	OrgIDCCGRes,
+	[CCG name],
+	MeasureName,
+	[Region name]
+
+
+UNION ALL
+
+
+--Sum up Open Referrals to organisation level for inclusion in the Data table - STP
+SELECT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	'STP' AS OrganisationType,
+	STP_Code AS OrganisationCode,
+	[STP name] AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	SUM(MeasureValue) AS MeasureValue,
+	NULL AS [Denominator],
+	[Region name] AS [Geographic benchmarking group]
+
+	FROM [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
+
+	GROUP BY ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	STP_Code,
+	[STP name],
+	MeasureName,
+	[Region name]
+
+
+UNION ALL
+
+
+--Sum up Open Referrals to organisation level for inclusion in the Data table - Region
+SELECT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	'Region' AS OrganisationType,
+	Region_Code AS OrganisationCode,
+	[Region name] AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	SUM(MeasureValue) AS MeasureValue,
+	NULL AS [Denominator],
+	'N/A' AS [Geographic benchmarking group]
+
+	FROM [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	WHERE MeasureName IN ('Caseload total','Open Referrals total','New referrals','Closed referrals')
+
+	GROUP BY ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	Region_Code,
+	[Region name],
+	MeasureName
+
+
+UNION ALL
+
+
+--Sum up Open Referrals to organisation level for inclusion in the Data table - England
+SELECT
+	ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	'England' AS OrganisationType,
+	'ENG' AS OrganisationCode,
+	'England' AS OrganisationName,
+	NULL AS nhser19cd_Prov,
+	MeasureName,
+	SUM(MeasureValue) AS MeasureValue,
+	NULL AS [Denominator],
+	'N/A' AS [Geographic benchmarking group]
+
+	FROM [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+	
+	WHERE MeasureName IN ('Open Referrals total','New referrals','Closed referrals')
+
+	GROUP BY ReportingPeriodEndDate,
+	SubmissionType,
+	UniqMonthID,
+	Der_FY,
+	MeasureName
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOTED ACCESS EXTRACT WITH DQ FLAGS BROUGH THROUGH FOR USE IN TABLEAU MAP
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('[MHDInternal].Temp_Perinatal_Pivot_Access_Extract') IS NOT NULL
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Access_Extract
+
+
+			SELECT DISTINCT
+			GETDATE() AS ImportDate,
+			a.ReportingPeriodEndDate,
+			a.SubmissionType,
+			a.UniqMonthID,
+			a.Der_FY,
+			a.OrganisationType,
+			a.OrganisationCode,
+			a.OrganisationName,
+			a.nhser19cd_Prov,
+			prov.Region_Name,
+			a.MeasureName,
+			a.MeasureValue,
+			ISNULL(a.Denominator,0) AS Denominator,
+			a.[Geographic benchmarking group],
+			d.[YTD Missed submission flag],
+			t.Targets
+			
+			INTO [MHDInternal].Temp_Perinatal_Pivot_Access_Extract
+			
+			FROM [MHDInternal].Temp_Perinatal_Pivot_Access a
+
+			LEFT JOIN [MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear d ON a.OrganisationCode = d.OrganisationCode AND a.OrganisationType = 'Provider'
+
+			LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies prov ON a.OrganisationCode = prov.Organisation_Code AND a.OrganisationType = 'Provider'
+
+			LEFT JOIN [MHDInternal].Temp_Perinatal_Targets t ON a.OrganisationType = t.OrganisationType AND a.OrganisationCode = t.OrganisationCode AND a.Der_FY = t.Fyear AND a.MeasureName ='YTD Access'
+
+			WHERE a.OrganisationCode != 'Missing / Invalid' AND a.OrganisationCode != 'RYK' -- Exclude DUDLEY INTEGRATED HEALTH AND CARE NHS TRUST (no longer submitting own PMH data) 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+UPDATE ACCESS AND MONTHLY SANDBOX TABLES WITH DATA FOR THIS FINANCIAL YEAR 
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+------ Add to testing tables
+
+DELETE FROM MHDInternal.Dashboard_MH_Perinatal_Activity
+INSERT INTO MHDInternal.Dashboard_MH_Perinatal_Activity
+
+SELECT * 
+FROM MHDInternal.Temp_Perinatal_Pivot_Monthly_Extract
+
+
+DELETE FROM MHDInternal.Dashboard_MH_Perinatal_Access
+INSERT INTO MHDInternal.Dashboard_MH_Perinatal_Access
+SELECT * 
+FROM MHDInternal.Temp_Perinatal_Pivot_Access_Extract
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+DROP TEMP TABLES
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Access_Extract
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Access
+DROP TABLE [MHDInternal].Temp_Perinatal_ProviderDQ_Submissions_FYear
+DROP TABLE [MHDInternal].Temp_Perinatal_AccessTotals
+--DROP TABLE [MHDInternal].Temp_Perinatal_Pub
+DROP TABLE [MHDInternal].Temp_Perinatal_Rolling
+DROP TABLE [MHDInternal].Temp_Perinatal_Targets
+DROP TABLE [MHDInternal].Temp_Perinatal_YTD
+DROP TABLE [MHDInternal].Temp_Perinatal_Pivot_Monthly_Extract
+DROP TABLE [MHDInternal].Temp_Perinatal_BaseMaster
+DROP TABLE [MHDInternal].Temp_Perinatal_Base
+DROP TABLE [MHDInternal].Temp_Perinatal_AllOrgs
+DROP TABLE [MHDInternal].Temp_Perinatal_AllDates
+DROP TABLE [MHDInternal].Temp_Perinatal_Master
+DROP TABLE [MHDInternal].Temp_Perinatal_contYTD
+DROP TABLE [MHDInternal].Temp_Perinatal_Conts
+DROP TABLE [MHDInternal].Temp_Perinatal_refs
+DROP TABLE [MHDInternal].Temp_Perinatal_Cumulative
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+LOG START
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+INSERT INTO MHDInternal.[PreProc_QueryStatus]
+
+SELECT
+	@EndRP AS [Month],
+	'Perinatal Report End' AS Step,
+	GETDATE() AS [TimeStamp]
+
+
