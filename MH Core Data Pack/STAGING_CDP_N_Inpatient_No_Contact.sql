@@ -8,26 +8,26 @@ MEASURE NAME:    CDP_N01	MHSDS Inpatient No Contact BME
 BACKGROUND INFO: no provider data, need to run extra months for rolling quarter calc (accounted for in time period)
 
 INPUT:			 
-			     NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients
-				 NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity
-				 NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
-				 NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges
-			     [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] 
-				 NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
-				 NHSE_Reference.dbo.tbl_Ref_Other_Dates_Full
-				 NHSE_UKHF.Data_Dictionary.vw_Mental_Health_Admitted_Patient_Classification_SCD
+			     MHDInternal.PreProc_Inpatients
+				 MHDInternal.PreProc_Activity
+				 MHDInternal.PreProc_Header
+				 [Internal_Reference].[ComCodeChanges]
+			     [Reporting].[Ref_ODS_Commissioner_Hierarchies]
+				 [Internal_Reference].[Provider_Successor]
+				 [Reporting].[Ref_ODS_Provider_Hierarchies]
+				 [MHDInternal].[REFERENCE_CDP_Trajectories]
+				 [MHDInternal].[REFERENCE_CDP_Plans]
+				 [MHDInternal].[REFERENCE_CDP_Standards]
+				 [Internal_Reference].[Date_Full]
+				 [UKHD_Data_Dictionary].[Mental_Health_Admitted_Patient_Classification_SCD]
 
-OUTPUT:			 [insert output tables]
+OUTPUT:			 MHDInternal.STAGING_CDP_N_Inpatient_No_Contact
 
 WRITTEN BY:		 JADE SYKES    06/2023
 
 UPDATES: 		 KIRSTY WALKER 07/12/2023 Change @RPEnd to remove "where Der_MostRecentFlag = 'Y'" FOR DEC-23 CHANGE TO SINGLE SUBMISSION WINDOW 
 								          (THERE USE TO BE A PROVISIONAL DATA WINDOW Y for performance data, P for provisional data BUT NOW WE JUST PULL OUT MAX REPORTING_PERIOD)
-
+Version -  CDP-Development/2B. STAGING TABLES/i) MONTHLY SCRIPTS/STAGING_CDP_N_NO_CONTACT.sql JM 29/08/2024
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -42,9 +42,9 @@ DECLARE @RP_STARTDATE DATE
 DECLARE @RP_ENDDATE DATE
 DECLARE @i INT
 
-SET @RP_ENDDATE = (SELECT MAX([ReportingPeriodEndDate]) FROM [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Header])
+SET @RP_ENDDATE =	(SELECT MAX([ReportingPeriodEndDate]) FROM MHDInternal.[PreProc_Header])
 
-SET @RP_END = (SELECT UniqMonthID FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE ReportingPeriodEndDate = @RP_ENDDATE)
+SET @RP_END = (SELECT UniqMonthID FROM MHDInternal.PreProc_Header WHERE ReportingPeriodEndDate = @RP_ENDDATE)
 
 SET @i = 
 CASE WHEN MONTH(@RP_ENDDATE) = 4 THEN -15 -- added 3 to each of these numbers so first month you need is a complete rolling quarter
@@ -62,7 +62,7 @@ CASE WHEN MONTH(@RP_ENDDATE) = 4 THEN -15 -- added 3 to each of these numbers so
 END
 
 SET @RP_STARTDATE = (SELECT DATEFROMPARTS(YEAR((SELECT DATEADD(mm,@i,@RP_ENDDATE))),MONTH((SELECT DATEADD(mm,@i,@RP_ENDDATE))),1) )
-SET @RP_START = (SELECT UniqMonthID FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header WHERE ReportingPeriodStartDate = @RP_STARTDATE)
+SET @RP_START = (SELECT UniqMonthID FROM MHDInternal.PreProc_Header WHERE ReportingPeriodStartDate = @RP_STARTDATE)
 
 PRINT @RP_STARTDATE
 PRINT @RP_START
@@ -70,8 +70,8 @@ PRINT @RP_ENDDATE
 PRINT @RP_END
 PRINT @i
 
--- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact]
+--- Delete any rows which already exist in output table for this time period
+DELETE FROM MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact]
 WHERE [Reporting_Period] BETWEEN @RP_STARTDATE AND @RP_ENDDATE
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -88,13 +88,10 @@ SELECT
 	,CASE WHEN r.EthnicCategory NOT IN ('A','99','-1') THEN 1 ELSE 0 END as NotWhiteBritish 
 	,CASE WHEN r.EthnicCategory = 'A' THEN 1 ELSE 0 END as WhiteBritish
 	,i.OrgIDProv 
-	,o1.Organisation_Name AS Provider_Name
-	,ISNULL(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
-	,ISNULL(o2.Region_Name,'Missing/Invalid') AS Region_Name
-	,COALESCE(cc.New_Code,r.OrgIDCCGRes,'Missing/Invalid') AS SubICBCode
-	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [SubICB name]
-	,COALESCE(o2.STP_Code,'Missing/Invalid') AS ICB_Code
-	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [ICB_name]
+	,r.Der_SubICBCode
+	,r.OrgIDCCGRes
+	,o.Region_Name
+	,CASE WHEN o.Region_Code IN ('REG001','REG002') THEN r.OrgIDCCGRes ELSE r.Der_SubICBCode END AS SubICBCode 
 	,i.StartDateHospProvSpell
 	,i.StartTimeHospProvSpell 
 	,d.Fin_Quarter_Qq_Fin_Year_YYYY_dash_YY AS FY_Quarter
@@ -107,30 +104,65 @@ SELECT
 	,r.RecordNumber AS RefRecordNumber 
 	,ROW_NUMBER()OVER(PARTITION BY i.UniqHospProvSpellNum ORDER BY r.UniqMonthID DESC, r.RecordNumber DESC) AS RN --- added because joining to refs produces some duplicates 
 	
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Admissions]  	
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions_Staging]  	
 	
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i 	
+FROM MHDInternal.PreProc_Inpatients i 	
 
-LEFT JOIN [NHSE_Sandbox_MentalHealth].[dbo].[PreProc_Inpatients] ia ON i.UniqHospProvSpellNum = ia.UniqHospProvSpellNum AND i.Person_ID = ia.Person_ID AND i.UniqServReqID = ia.UniqServReqID  ----- records are partitioned on spell, person and ref : therefore have joined on spell, person and ref	
+LEFT JOIN MHDInternal.[PreProc_Inpatients] ia ON i.UniqHospProvSpellNum = ia.UniqHospProvSpellNum AND i.Person_ID = ia.Person_ID AND i.UniqServReqID = ia.UniqServReqID  ----- records are partitioned on spell, person and ref : therefore have joined on spell, person and ref	
 	AND ia.Der_FirstWardStayRecord = 1 ---- ward stay at admission
 	
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL) 	
+LEFT JOIN MHDInternal.PreProc_Referral r ON i.RecordNumber = r.RecordNumber AND i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL OR r.LADistrictAuth = '') 	
 	
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on i.OrgIDProv = ps.Prov_original 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies o1 ON COALESCE(ps.Prov_Successor, i.OrgIDProv) = o1.Organisation_Code 	
+LEFT JOIN [UKHD_Data_Dictionary].[Mental_Health_Admitted_Patient_Classification_SCD] b ON ia.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1	
 	
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_ComCodeChanges cc ON r.OrgIDCCGRes = cc.Org_Code
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.OrgIDCCGRes) = o2.Organisation_Code	
-	
-LEFT JOIN NHSE_UKHF.Data_Dictionary.vw_Mental_Health_Admitted_Patient_Classification_SCD b ON ia.HospitalBedTypeMH = b.Main_Code_Text COLLATE DATABASE_DEFAULT AND Is_Latest = 1	
-	
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_Other_Dates_Full d ON i.StartDateHospProvSpell = d.Full_Date 	
+LEFT JOIN [Internal_Reference].[Date_Full] d ON i.StartDateHospProvSpell = d.Full_Date 	
+
+LEFT JOIN [Reporting].[Ref_ODS_Commissioner_Hierarchies] o ON r.Der_SubICBCode = o.Organisation_Code
 	
 WHERE i.StartDateHospProvSpell BETWEEN @RP_STARTDATE AND @RP_ENDDATE	
 AND i.UniqMonthID BETWEEN @RP_START AND @RP_END	
-AND ia.HospitalBedTypeMH IN ('10','11','12') --- adult/older acute and PICU admissions only  	
+AND ia.HospitalBedTypeMH IN ('10','11','12','200','201','202') --- adult/older acute and PICU admissions only  	
 AND i.SourceAdmCodeHospProvSpell NOT IN ('49','53','87') --- excluding people transferred from other MH inpatient settings 	
+
+--- ADD IN SUBICB, ICB, AND REGIONS 
+
+SELECT 
+	i.UniqMonthID
+	,i.UniqHospProvSpellNum
+	,i.Person_ID
+	,i.EthnicCategory
+	,i.NotWhiteBritish 
+	,i.WhiteBritish
+	,i.OrgIDProv 
+	,o1.Organisation_Name AS Provider_Name
+	,ISNULL(o2.Region_Code,'Missing/Invalid') AS Region_Code --- regions taken from CCG rather than provider 
+	,ISNULL(o2.Region_Name,'Missing/Invalid') AS Region_Name
+	,COALESCE(cc.New_Code,i.SubICBCode,'Missing/Invalid') AS SubICBCode
+	,COALESCE(o2.Organisation_Name,'Missing/Invalid') AS [SubICB name]
+	,COALESCE(o2.STP_Code,'Missing/Invalid') AS ICB_Code
+	,COALESCE(o2.STP_Name,'Missing/Invalid') AS [ICB_name]
+	,i.StartDateHospProvSpell
+	,i.StartTimeHospProvSpell 
+	,i.FY_Quarter
+	,i.Adm_month
+	,i.HospitalBedTypeMH
+	,i.BedType
+	,i.AgeServReferRecDate
+	,i.UniqServReqID 
+	,i.RefMonth
+	,i.RefRecordNumber 
+	,i.RN
+
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions]  
+
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions_Staging] i
+
+LEFT JOIN [Internal_Reference].[Provider_Successor] ps on i.OrgIDProv = ps.Prov_original 
+LEFT JOIN [Reporting].[Ref_ODS_Provider_Hierarchies] o1 ON COALESCE(ps.Prov_Successor, i.OrgIDProv) = o1.Organisation_Code 	
 	
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON i.SubICBCode = cc.Org_Code
+LEFT JOIN [Reporting].[Ref_ODS_Commissioner_Hierarchies] o2 ON COALESCE(cc.New_Code,i.SubICBCode) = o2.Organisation_Code	
+
 
 -- GET PREVIOUS CONTACTS FOR PEOPLE ADMITTED IN THE RP 
 
@@ -152,16 +184,16 @@ SELECT
 	,DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) AS TimeToAdm 
 	,ROW_NUMBER() OVER(PARTITION BY a.UniqHospProvSpellNum ORDER BY c.Der_ContactDate DESC) AS RN --- order to get most contact prior referral for each hospital spell 
 	
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts]
 	
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity c 	
+FROM MHDInternal.PreProc_Activity c 	
 	
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Admissions]   a ON c.Person_ID = a.Person_ID --- same person 	
+INNER JOIN MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions]   a ON c.Person_ID = a.Person_ID --- same person 	
 	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) <= 365 --- contact up to 1yr before admission
 	AND DATEDIFF(DD, c.Der_ContactDate, a.StartDateHospProvSpell) > 2 --- exclude contacts in two days before admission 
-	AND a.RN = 1 
+	--AND a.RN = 1 
 	
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Inpatients i ON c.Person_ID = i.Person_ID AND c.UniqServReqID = i.UniqServReqID AND i.Der_HospSpellRecordOrder =1 --- to get contacts as part of hospital spell 	
+LEFT JOIN MHDInternal.PreProc_Inpatients i ON c.Person_ID = i.Person_ID AND c.UniqServReqID = i.UniqServReqID AND i.Der_HospSpellRecordOrder =1 --- to get contacts as part of hospital spell 	
 	AND i.UniqHospProvSpellNum IS NULL --- exclude contacts as part of a hospital spell 
 	
 WHERE 	
@@ -189,11 +221,11 @@ SELECT
 	,COUNT(*) AS Admissions  
 	,SUM(CASE WHEN p.UniqHospProvSpellNum IS NULL THEN 1 ELSE 0 END) as NoContact
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_Agg]
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Admissions]   a
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions]   a
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts] p ON a.UniqHospProvSpellNum = p.UniqHospProvSpellNum AND p.RN = 1 
+LEFT JOIN MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts] p ON a.UniqHospProvSpellNum = p.UniqHospProvSpellNum AND p.RN = 1 
 
 WHERE a.RN = 1 
 
@@ -222,9 +254,9 @@ SELECT
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Output]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_Output]
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg]  
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Agg]  
 
 GROUP BY ReportingPeriodStartDate 
 
@@ -246,7 +278,7 @@ SELECT
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg]  
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Agg]  
 
 GROUP BY Region_Code, Region_Name, ReportingPeriodStartDate 
 
@@ -268,7 +300,7 @@ SELECT
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg] 
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Agg] 
 
 GROUP BY [ICB_Code], [ICB_Name], Region_Code, Region_Name, ReportingPeriodStartDate 
 
@@ -290,7 +322,7 @@ SELECT
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN Admissions ELSE 0 END) as NonWhite_Admissions
 	,SUM(CASE WHEN Ethnicity = 'Non-white British' THEN NoContact ELSE 0 END) as NonWhite_NoContact
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg] 
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Agg] 
 
 GROUP BY SubICBCode, [SubICB name], [ICB_Code], [ICB_Name], Region_Code, Region_Name, ReportingPeriodStartDate 
 
@@ -312,9 +344,9 @@ SELECT
 	,SUM(SUM(NonWhite_Admissions)) OVER (PARTITION BY Org_Type, Org_Code, Org_Name ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS [MHSDS Inpatient No Contact BME Denominator] 
 	,SUM(SUM(NonWhite_NoContact)) OVER (PARTITION BY Org_Type, Org_Code, Org_Name ORDER BY ReportingPeriodStartDate ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS [MHSDS Inpatient No Contact BME Numerator]
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_RAW]
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Output] 
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Output] 
 
 GROUP BY Org_Type, Org_Code, Org_Name,ICB_Code
 	,ICB_Name
@@ -336,8 +368,8 @@ SELECT [Reporting_Period]
 ,CAST([MHSDS Inpatient No Contact BME Denominator] AS FLOAT) AS [MHSDS Inpatient No Contact BME Denominator]
 ,CAST([MHSDS Inpatient No Contact BME Numerator] AS FLOAT) AS [MHSDS Inpatient No Contact BME Numerator] 
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_2]
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_RAW_2]
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_RAW]
 WHERE [Reporting_Period] BETWEEN DATEADD(mm,3,@RP_STARTDATE) AND @RP_ENDDATE
 
 --unpivot to new structure
@@ -352,10 +384,10 @@ SELECT [Reporting_Period]
 ,[Region_Code]
 ,[Region_Name]
 ,[Measure_Value]
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_3]
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_RAW_3]
 FROM   
    (SELECT *
-   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_2]) p  
+   FROM MHDInternal.[TEMP_CDP_N_Inpatient_RAW_2]) p  
 UNPIVOT  
    ( [Measure_Value] FOR [Measure_Name_Type] IN   
       (
@@ -383,8 +415,8 @@ WHEN [Measure_Name_Type] LIKE '%White%' THEN 'MHSDS Inpatient No Contact White B
 ,CASE WHEN [Measure_Name_Type] LIKE '%Numerator%' THEN 'Numerator'
 WHEN [Measure_Name_Type] LIKE '%Denominator%' THEN 'Denominator' END AS Measure_Type
 ,[Measure_Value]
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_MASTER]
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_3] f
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_MASTER]
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_RAW_3] f
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 2: REALLOCATIONS
@@ -395,36 +427,36 @@ STEP 2: REALLOCATIONS
 -- Reallocations Data
 
 --GET LIST OF UNIQUE REALLOCATIONS FOR ORGS minus bassetlaw
-IF OBJECT_ID ('[NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+IF OBJECT_ID ('MHDInternal.[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
+DROP TABLE MHDInternal.[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
 
 SELECT DISTINCT [From] COLLATE database_default as Orgs
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  INTO MHDInternal.[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+  FROM MHDInternal.[REFERENCE_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 UNION
 
 SELECT DISTINCT [Add] COLLATE database_default as Orgs
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  FROM MHDInternal.[REFERENCE_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location)
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_MASTER]
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_MASTER]
 
- WHERE Org_Code IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+ WHERE Org_Code IN (SELECT Orgs FROM MHDInternal.[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01'
 
 --No change data
 
 -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location) 
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Change]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_MASTER]
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_No_Change]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_MASTER]
  WHERE Reporting_Period >='2022-07-01' 
-    OR (Org_Code NOT IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+    OR (Org_Code NOT IN (SELECT Orgs FROM MHDInternal.[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01' )
 
 -- Calculate activity movement for donor orgs
@@ -438,10 +470,10 @@ SELECT
 	   r.Measure_Value * Change as Measure_Value_Change,
 	   [Add]
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Changes_From]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations] r
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Changes_From]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
+INNER JOIN MHDInternal.[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
  WHERE Bassetlaw_Indicator = 1	--change depending on Bassetlaw mappings (0 or 1)
 
 -- Sum activity movement for orgs gaining (need to sum for Midlands Y60 which recieves from 2 orgs)
@@ -454,8 +486,8 @@ SELECT
 	   r.Measure_Type,
 	   SUM(Measure_Value_Change) as Measure_Value_Change
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Changes_Add]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Changes_From] r
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Changes_Add]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Changes_From] r
 
 GROUP BY 
 r.Reporting_Period,
@@ -481,10 +513,10 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value - Measure_Value_Change as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Final]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations] r
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Final]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Changes_From] c 
+INNER JOIN MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Changes_From] c 
         ON r.Org_Code = c.Org_Code 
        AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -507,9 +539,9 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value + Measure_Value_Change as Measure_Value
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations] r
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Changes_Add] c 
+INNER JOIN MHDInternal.[TEMP_CDP_N_Inpatient_Changes_Add] c 
         ON r.Org_Code = c.Org_Code 
 	   AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -517,13 +549,13 @@ INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Changes_Add] c
 
 --Collate reallocations with no change data to create new 'master' table
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Master_2]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Final]
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Master_2]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Final]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Change]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_No_Change]
 
 -- Calculate any percentages needed in the data
 --Example script for this
@@ -551,13 +583,13 @@ SELECT
 			 END) 
 	    )*100  as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Percentage_Calcs]
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Percentage_Calcs]
   FROM (SELECT * 
-		  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Master_2] 
+		  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Master_2] 
 		 WHERE Measure_Type = 'Numerator') a
 INNER JOIN 
 	   (SELECT * 
-	      FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Master_2] 
+	      FROM MHDInternal.[TEMP_CDP_N_Inpatient_Master_2] 
 		 WHERE Measure_Type = 'Denominator') b  
 		    ON a.Reporting_Period = b.Reporting_Period 
 		   AND a.Org_Code = b.Org_Code 
@@ -567,13 +599,13 @@ INNER JOIN
 -- Collate Percentage calcs with rest of data
 SELECT * 
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Master_2]
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Final] 
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Master_2]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Percentage_Calcs]
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Percentage_Calcs]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ADD IN MISSING SubICBs & ICBs
@@ -588,8 +620,8 @@ SELECT DISTINCT
 ,STP_Name AS [ICB_Name]
 ,Region_Code
 ,Region_Name
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List]
-FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_Org_List]
+FROM [Reporting].[Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
 
 UNION
 
@@ -601,13 +633,13 @@ SELECT DISTINCT
 ,STP_Name AS [ICB_Name]
 ,Region_Code
 ,Region_Name
-FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+FROM [Reporting].[Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
 
 -- Get list of all orgs and indicator combinations
 SELECT * 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List_Dates]
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List]
-CROSS JOIN (SELECT DISTINCT [Reporting_Period], [CDP_Measure_ID],[CDP_Measure_Name],[Measure_Type] FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final]      )_
+INTO MHDInternal.[TEMP_CDP_N_Inpatient_Org_List_Dates]
+FROM MHDInternal.[TEMP_CDP_N_Inpatient_Org_List]
+CROSS JOIN (SELECT DISTINCT [Reporting_Period], [CDP_Measure_ID],[CDP_Measure_Name],[Measure_Type] FROM MHDInternal.[TEMP_CDP_N_Inpatient_Final]      )_
 
 
 -- Find list of only missing rows
@@ -625,16 +657,19 @@ d.Reporting_Period,
 	   d.Measure_Type,
 	   NULL AS Measure_Value
 
-	   INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Missing_Orgs]
+	   INTO MHDInternal.[TEMP_CDP_N_Inpatient_Missing_Orgs]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List_Dates] d
+	   FROM MHDInternal.[TEMP_CDP_N_Inpatient_Org_List_Dates] d
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final]   e ON d.CDP_Measure_ID = e.CDP_Measure_ID  AND d.[Org_Type] = e.[Org_Type] AND d.CDP_Measure_ID = e.CDP_Measure_ID AND  d.[Reporting_Period] = e.[Reporting_Period] AND d.[Org_Code] = e.[Org_Code] AND d.[Measure_Type] = e.[Measure_Type] AND d.[Org_Type] = e.[Org_Type]
+LEFT JOIN MHDInternal.[TEMP_CDP_N_Inpatient_Final]   e ON d.CDP_Measure_ID = e.CDP_Measure_ID  AND d.[Org_Type] = e.[Org_Type] AND d.CDP_Measure_ID = e.CDP_Measure_ID AND  d.[Reporting_Period] = e.[Reporting_Period] AND d.[Org_Code] = e.[Org_Code] AND d.[Measure_Type] = e.[Measure_Type] AND d.[Org_Type] = e.[Org_Type]
 WHERE e.Org_Code IS NULL
 
 -- Add into data
-INSERT INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final] 
-SELECT * FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Missing_Orgs]
+INSERT INTO MHDInternal.[TEMP_CDP_N_Inpatient_Final] 
+SELECT * FROM MHDInternal.[TEMP_CDP_N_Inpatient_Missing_Orgs]
+
+
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
@@ -682,25 +717,26 @@ SELECT DISTINCT
 	   l.LTP_Trajectory_STR,
 	   p.Plan_STR
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final_2] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final]  f
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Final_2] 
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Final]  f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] l 
+LEFT JOIN MHDInternal.[Reference_CDP_LTP_Trajectories] l 
     ON f.Reporting_Period = l.Reporting_Period 
    AND f.Org_Code = l.Org_Code 
    AND f.CDP_Measure_ID = l.CDP_Measure_ID
    AND f.Measure_Type = l.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p 
+LEFT JOIN MHDInternal.[REFERENCE_CDP_Plans] p 
     ON f.Reporting_Period = p.Reporting_Period 
    AND f.Org_Code = p.Org_Code 
    AND f.CDP_Measure_ID = p.CDP_Measure_ID 
    AND f.Measure_Type = p.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s 
+LEFT JOIN MHDInternal.[REFERENCE_CDP_Standards] s 
     ON f.Reporting_Period = s.Reporting_Period 
    AND f.CDP_Measure_ID = s.CDP_Measure_ID 
    AND f.Measure_Type = s.Measure_Type
+
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -708,16 +744,16 @@ STEP 4: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
-UPDATE NHSE_Sandbox_Policy.dbo.STAGING_CDP_N_Inpatient_No_Contact
+UPDATE MHDInternal.STAGING_CDP_N_Inpatient_No_Contact
    SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) as Reporting_Period 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Is_Latest] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final_2] 
+  INTO MHDInternal.[TEMP_CDP_N_Inpatient_Is_Latest] 
+  FROM MHDInternal.[TEMP_CDP_N_Inpatient_Final_2] 
 
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact]
+INSERT INTO MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact]
 SELECT
 	   EOMONTH(f.Reporting_Period) AS Reporting_Period, -- convert to reporting period end date
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -751,22 +787,22 @@ SELECT
 	   CAST(Plan_Percentage_Achieved*100 as varchar)+'%' as Plan_Percentage_Achieved_STR,
 	   GETDATE() as Last_Modified
 
-   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final_2]  f
+   FROM MHDInternal.[TEMP_CDP_N_Inpatient_Final_2]  f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Is_Latest]  i ON f.Reporting_Period = i.Reporting_Period
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Missing_Orgs] e ON f.CDP_Measure_ID = e.CDP_Measure_ID AND f.[Reporting_Period] = e.[Reporting_Period] AND f.[Measure_Type] = e.[Measure_Type] AND f.[Org_Code] = e.[Org_Code] AND f.[Org_Type] = e.[Org_Type]
+LEFT JOIN MHDInternal.[TEMP_CDP_N_Inpatient_Is_Latest]  i ON f.Reporting_Period = i.Reporting_Period
+LEFT JOIN MHDInternal.[TEMP_CDP_N_Inpatient_Missing_Orgs] e ON f.CDP_Measure_ID = e.CDP_Measure_ID AND f.[Reporting_Period] = e.[Reporting_Period] AND f.[Measure_Type] = e.[Measure_Type] AND f.[Org_Code] = e.[Org_Code] AND f.[Org_Type] = e.[Org_Type]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 5: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact]
+DELETE FROM MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact]
  WHERE Region_Code LIKE 'REG%' 
 	OR Org_Code IS NULL 
 	OR (Org_Type = 'SubICB' 
-   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
-    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
-	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [Reporting].[Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [Reporting].[Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
+	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [Reporting].[Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
 
 -- Check for duplicate rows, this should return a blank table if none
 SELECT DISTINCT 
@@ -785,7 +821,7 @@ SELECT DISTINCT
 			   Org_Type,
 			   Org_Code,
 			   count(1) cnt
-		 FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact]
+		 FROM MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact]
          GROUP BY 
 		 Reporting_Period,
 		 CDP_Measure_ID,
@@ -845,12 +881,12 @@ SELECT
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),1)
 	   END as Percentage_Change
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact] latest
+  FROM MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact] latest
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN MHDInternal.[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact] previous
+  LEFT JOIN MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -866,32 +902,32 @@ ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_N_Inpatient_No_Contact]
+  FROM MHDInternal.[STAGING_CDP_N_Inpatient_No_Contact]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 6: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Admissions]  
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Agg]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Output]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_2]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_RAW_3]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_MASTER]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_No_Change]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Changes_From]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Changes_Add]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Reallocations_Final]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Master_2]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Percentage_Calcs]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final] 
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Org_List_Dates]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Missing_Orgs]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Final_2] 
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_N_Inpatient_Is_Latest] 
-
+	DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions_Staging]  
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Admissions]  
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_No_Contact_Prev_Contacts]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Agg]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Output]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_RAW]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_RAW_2]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_RAW_3]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_MASTER]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_No_Change]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Changes_From]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Changes_Add]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Reallocations_Final]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Master_2]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Percentage_Calcs]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Final] 
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Org_List]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Org_List_Dates]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Missing_Orgs]
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Final_2] 
+DROP TABLE MHDInternal.[TEMP_CDP_N_Inpatient_Is_Latest] 
 
