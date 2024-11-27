@@ -9,19 +9,19 @@ MEASURE DESCRIPTION:
 
 BACKGROUND INFO: 
 
-INPUT:			 [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] (Comes from patient level MHSDS data (unpublished))
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
+INPUT:			 [MHDInternal].[Dashboard_MH_IPS] (Comes from patient level MHSDS data (unpublished))
+				 [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+				 [Internal_Reference].[ComCodeChanges]
+				 [Reporting_UKHD_ODS].[Provider_Hierarchies]
+				 [Internal_Reference].[Provider_Successor]
+				 [MHDInternal].[Reference_CDP_Boundary_Population_Changes]
+				 [MHDInternal].[Reference_CDP_Trajectories]
+				 [MHDInternal].[Reference_CDP_Plans]
+				 [MHDInternal].[Reference_CDP_Standards]
 
 TEMP TABLES:	 SEE DROPPED TABLES AT END OF THE SCRIPT.
 
-OUTPUT:			 [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+OUTPUT:			 [MHDInternal].[STAGING_CDP_I_IPS]
 
 WRITTEN BY:		 Kirsty Walker 05/07/2023
 
@@ -42,8 +42,7 @@ DECLARE @RPStart as DATE
 
 DECLARE @i INT
  
-SET @RPEnd = (SELECT eomonth(dateadd(month,0,MAX(ReportingPeriodEnd))) 
-			    FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild])  
+SET @RPEnd = (SELECT eomonth(dateadd(month,0,MAX(ReportingPeriodEnd))) FROM [MHDInternal].Dashboard_MH_IPS)  
 
 SET @i = 
 CASE WHEN MONTH(@RPEnd) = 4 THEN -12
@@ -62,13 +61,10 @@ END
 
 SET @RPStart = (SELECT DATEADD(mm,@i,@RPEnd))
 --SET @RPStart = '2019-04-30'
-
-PRINT @RPStart
-PRINT @RPEnd
-PRINT @i
-
+print  @RPEnd
+print  @RPStart
 -- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+DELETE FROM [MHDInternal].[STAGING_CDP_I_IPS]
 WHERE [Reporting_Period] BETWEEN @RPStart AND @RPEnd
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -83,7 +79,7 @@ SELECT
 	   'MHSDS IPS' as CDP_Measure_Name,
 	   'Provider' as Org_Type,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default) as Org_Code,
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName)  as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName) as Org_Name, --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code) as ICB_Code,
 	   COALESCE(ph.STP_Name,chst1.STP_Code) as ICB_Name,
 	   COALESCE(ph.Region_Code, st.Region_Code) AS Region_Code,
@@ -91,16 +87,16 @@ SELECT
 	   'Count' as Measure_Type,
 	   sum(s.MeasureValue) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs]
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
+ FROM [MHDInternal].[Dashboard_MH_IPS] s
 
 --Provider hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on s.OrgIDProv = ps.Prov_original COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, s.OrgIDProv) = ph.Organisation_Code COLLATE database_default
-LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker]) st on s.OrgIDProv = st.Org_Code
-	LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst1 ON st.ICB_Code = chst1.STP_Code -- GET ICB NAME FROM ODS FOR CONSISTENCY FOR MLP
-	LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) chst2 ON st.Region_Code = chst2.Region_Code -- GET REG NAME FROM ODS FOR CONSISTENCY FOR MPL
+LEFT JOIN [Internal_Reference].[Provider_Successor] ps on s.OrgIDProv = ps.Prov_original COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, s.OrgIDProv) = ph.Organisation_Code COLLATE database_default
+LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code, Reporting_Period FROM [MHDInternal].[Reference_MHSDS_Submission_Tracker]) st on s.OrgIDProv = st.Org_Code and s.ReportingPeriodEnd=st.Reporting_Period
+	LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) chst1 ON st.ICB_Code = chst1.STP_Code -- GET ICB NAME FROM ODS FOR CONSISTENCY FOR MLP
+	LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) chst2 ON st.Region_Code = chst2.Region_Code -- GET REG NAME FROM ODS FOR CONSISTENCY FOR MPL
 
  WHERE s.ReportingPeriodEnd between @RPStart and @RPEnd
    AND s.MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
@@ -108,7 +104,7 @@ LEFT JOIN (SELECT DISTINCT Org_Code, Organisation_Name, ICB_Code, Region_Code FR
 GROUP BY
 	   s.ReportingPeriodEnd,
 	   COALESCE(ps.Prov_Successor, s.OrgIDProv,'Missing / Invalid' COLLATE database_default),
-	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName) , --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
+	   COALESCE(ph.Organisation_Name, st.Organisation_Name,s.ProvName), --this was under the [ICB Name - CCG Code] naming convention in the NCDR table but in the [Reporting].[Ref_ODS_Commissioner_Hierarchies_ICB] table in UDAL this will become the SUB LOCATION name.
 	   COALESCE(ph.STP_Code,st.ICB_Code),
 	   COALESCE(ph.STP_Name,chst1.STP_Code),
 	   COALESCE(ph.Region_Code, st.Region_Code),
@@ -130,11 +126,10 @@ SELECT
 	   ch.Region_Name,
 	   'Count' as Measure_Type,
 	   sum(s.MeasureValue) as Measure_Value
+  FROM [MHDInternal].[Dashboard_MH_IPS] s
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
-
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON s.OrgIDCCGRes= cc.Org_Code COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,s.OrgIDCCGRes) = ch.Organisation_Code COLLATE database_default
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON s.OrgIDCCGRes = cc.Org_Code COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,s.OrgIDCCGRes) = ch.Organisation_Code COLLATE database_default
 
  WHERE s.ReportingPeriodEnd between @RPStart and @RPEnd
    AND s.MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
@@ -165,11 +160,11 @@ SELECT
 	   'Count' as Measure_Type,
 	   sum(s.MeasureValue) as Measure_Value
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
+  FROM [MHDInternal].[Dashboard_MH_IPS] s
 
 --ICB hierarchies
 LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name, Region_Code, Region_Name
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) i
+					  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) i
 					    ON s.STP_Code = i.STP_Code
 
  WHERE s.ReportingPeriodEnd between @RPStart and @RPEnd
@@ -201,11 +196,11 @@ SELECT
 	   'Count' as Measure_Type,
 	   sum(s.MeasureValue) as Measure_Value
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
+  FROM [MHDInternal].[Dashboard_MH_IPS] s
 
 --Region names
 LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name 
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) r 
+					  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) r 
 					    ON s.Region_Code = r.Region_Code
 
  WHERE s.ReportingPeriodEnd between @RPStart and @RPEnd
@@ -233,7 +228,7 @@ SELECT
 	   'Count' as Measure_Type,
 	   sum(s.MeasureValue) as Measure_Value
 
-  FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_IPS_rebuild] s
+  FROM [MHDInternal].[Dashboard_MH_IPS] s
 
  WHERE s.ReportingPeriodEnd between @RPStart and @RPEnd
    AND s.MeasureName = 'AccessedInFinancialYear' -- Total accessed (first contact in financial year) on dashboard
@@ -250,35 +245,35 @@ STEP 2: REALLOCATIONS
 -- Reallocations Data
 
 --GET LIST OF UNIQUE REALLOCATIONS FOR ORGS minus bassetlaw
-IF OBJECT_ID ('[NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+IF OBJECT_ID ('[MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]') IS NOT NULL
+DROP TABLE [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
 
 SELECT DISTINCT [From] COLLATE database_default as Orgs
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  INTO [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+  FROM [MHDInternal].[Reference_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 UNION
 
 SELECT DISTINCT [Add] COLLATE database_default as Orgs
-  FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
+  FROM [MHDInternal].[Reference_CDP_Boundary_Population_Changes]
  WHERE Bassetlaw_Indicator = 0
 
 -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location)
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs]
 
- WHERE Org_Code IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+ WHERE Org_Code IN (SELECT Orgs FROM [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01'
 
 --No change data
 -- Use this for if Bassetlaw_Indicator = 0 (bassetlaw has moved to new location) 
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs]
  WHERE Reporting_Period >='2022-07-01' 
-    OR (Org_Code NOT IN (SELECT Orgs FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
+    OR (Org_Code NOT IN (SELECT Orgs FROM [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw])
    AND Reporting_Period <'2022-07-01' )
 
 -- Calculate activity movement for donor orgs
@@ -292,10 +287,10 @@ SELECT
 	   r.Measure_Value * Change as Measure_Value_Change,
 	   [Add]
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
+INNER JOIN [MHDInternal].[Reference_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
  WHERE Bassetlaw_Indicator = 1	--change depending on Bassetlaw mappings (0 or 1)
 
 -- Sum activity movement for orgs gaining (need to sum for Midlands Y60 which recieves from 2 orgs)
@@ -308,8 +303,8 @@ SELECT
 	   r.Measure_Type,
 	   SUM(Measure_Value_Change) as Measure_Value_Change
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From] r
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From] r
 
 GROUP BY 
 r.Reporting_Period,
@@ -335,10 +330,10 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value - Measure_Value_Change as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From] c 
         ON r.Org_Code = c.Org_Code 
        AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -361,9 +356,9 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value + Measure_Value_Change as Measure_Value
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add] c 
         ON r.Org_Code = c.Org_Code 
 	   AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -371,13 +366,13 @@ INNER JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_C
 
 --Collate reallocations with no change data to create new 'master' table
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocated]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocated]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3: CALCULATE IPS CUMULATIVE
@@ -410,9 +405,9 @@ SELECT DISTINCT
 			when f.Reporting_Period like '%-03-%' then SUM(SUM(f.Measure_Value)) OVER (PARTITION BY f.Org_Type, f.Org_Code, f.Org_Name ORDER BY f.Reporting_Period ASC ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) 
 	   END as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_Cumulative]
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocated] f
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocated] f
 
 GROUP BY
 	   f.Reporting_Period,
@@ -441,10 +436,11 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List]
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] 
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_Org_List]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] 
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+   AND Organisation_Name NOT LIKE '%SUB-ICB REPORTING ENTITY' --To exclude sub-ICB reporting entities being brought through with no data 
 
 UNION
 
@@ -457,20 +453,21 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+   AND Organisation_Name NOT LIKE '%SUB-ICB REPORTING ENTITY' --To exclude sub-ICB reporting entities being brought through with no data 
 
 -- Get list of all orgs and indicator combinations
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List_Dates]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_Org_List_Dates]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_Org_List]
 CROSS JOIN (SELECT DISTINCT 
 				   Reporting_Period, 
 				   CDP_Measure_ID,
 				   CDP_Measure_Name,
 				   Measure_Type 
-			  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative])_
+			  FROM [MHDInternal].[TEMP_CDP_I_IPS_Cumulative])_
 
 -- Find list of only missing rows
 SELECT 
@@ -487,11 +484,11 @@ SELECT
 	   d.Measure_Type,
 	   CAST(NULL as float) as Measure_Value
 
- INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Missing_Orgs]
+ INTO [MHDInternal].[TEMP_CDP_I_IPS_Missing_Orgs]
 
- FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List_Dates] d
+ FROM [MHDInternal].[TEMP_CDP_I_IPS_Org_List_Dates] d
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_I_IPS_Cumulative] e 
    ON d.Reporting_Period = e.Reporting_Period
   AND d.CDP_Measure_ID = e.CDP_Measure_ID  
   AND d.Org_Type = e.Org_Type
@@ -500,9 +497,9 @@ LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative] e
 WHERE e.Org_Code IS NULL
 
 -- Add into data
-INSERT INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative]
+INSERT INTO [MHDInternal].[TEMP_CDP_I_IPS_Cumulative]
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Missing_Orgs]
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_Missing_Orgs]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 5: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
@@ -536,23 +533,23 @@ SELECT DISTINCT
 	   l.LTP_Trajectory_STR,
 	   p.Plan_STR
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative] f
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_Cumulative] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] l 
+LEFT JOIN [MHDInternal].[Reference_CDP_LTP_Trajectories] l 
     ON f.Reporting_Period = l.Reporting_Period 
    AND f.Org_Code = l.Org_Code 
    AND f.CDP_Measure_ID = l.CDP_Measure_ID
    AND f.Measure_Type = l.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p 
+LEFT JOIN [MHDInternal].[Reference_CDP_Plans] p 
     ON f.Reporting_Period = p.Reporting_Period 
    AND f.Org_Code = p.Org_Code 
    AND f.CDP_Measure_ID = p.CDP_Measure_ID 
    AND f.Measure_Type = p.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s 
+LEFT JOIN [MHDInternal].[Reference_CDP_Standards] s 
     ON f.Reporting_Period = s.Reporting_Period 
    AND f.CDP_Measure_ID = s.CDP_Measure_ID 
    AND f.Measure_Type = s.Measure_Type
@@ -563,16 +560,16 @@ STEP 6: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
-UPDATE [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
-SET Is_Latest = 0
+--UPDATE [MHDInternal].[STAGING_CDP_I_IPS]
+--SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) as Reporting_Period 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Is_Latest] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
+  INTO [MHDInternal].[TEMP_CDP_I_IPS_Is_Latest] 
+  FROM [MHDInternal].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
 
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+INSERT INTO [MHDInternal].[STAGING_CDP_I_IPS]
 SELECT
 	   f.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -607,11 +604,11 @@ SELECT
 	   CAST(Plan_Percentage_Achieved*100 as varchar)+'%' as Plan_Percentage_Achieved_STR,
 	   GETDATE() as Last_Modified
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets] f
+FROM [MHDInternal].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Is_Latest] i ON f.Reporting_Period = i.Reporting_Period
+LEFT JOIN [MHDInternal].[TEMP_CDP_I_IPS_Is_Latest] i ON f.Reporting_Period = i.Reporting_Period
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Missing_Orgs] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_I_IPS_Missing_Orgs] e 
   ON  f.Reporting_Period = e.Reporting_Period
  AND f.CDP_Measure_ID = e.CDP_Measure_ID 
  AND f.Org_Type = e.Org_Type
@@ -623,13 +620,13 @@ LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Missing_Orgs] e
 STEP 7: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+DELETE FROM [MHDInternal].[STAGING_CDP_I_IPS]
  WHERE Region_Code LIKE 'REG%' 
 	OR Org_Code IS NULL 
 	OR (Org_Type = 'SubICB' 
-   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
-    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
-	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
+	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
 
 -- Check for duplicate rows, this should return a blank table if none
 SELECT DISTINCT 
@@ -648,7 +645,7 @@ SELECT DISTINCT
 			   Org_Type,
 			   Org_Code,
 			   count(1) cnt
-		 FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+		 FROM [MHDInternal].[STAGING_CDP_I_IPS]
          GROUP BY 
 		 Reporting_Period,
 		 CDP_Measure_ID,
@@ -710,12 +707,12 @@ SELECT
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),1)
 	   END as Percentage_Change
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS] latest
+  FROM [MHDInternal].[STAGING_CDP_I_IPS] latest
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN [MHDInternal].[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS] previous
+  LEFT JOIN [MHDInternal].[STAGING_CDP_I_IPS] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -731,7 +728,7 @@ ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+  FROM [MHDInternal].[STAGING_CDP_I_IPS]
   WHERE Measure_Value IS NOT NULL
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -739,30 +736,30 @@ STEP 7: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 --STEP 1A: WRANGLE THE RAW DATA INTO THE REQUIRED MEASURE TABLE
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs]
 
 --STEP 2: REALLOCATIONS
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_All_Orgs_Reallocated]
+DROP TABLE [MHDInternal].[TEMP_CDP_Reallocations_Orgs_without_Bassetlaw]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_No_Change]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_From]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Changes_Add]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocations_Final]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_All_Orgs_Reallocated]
 
 --STEP 3: CALCULATE IPS CUMULATIVE
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Cumulative]
 
 --STEP 4: ADD IN MISSING SubICBs & ICBs
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Org_List_Dates]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Missing_Orgs]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Org_List]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Org_List_Dates]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Missing_Orgs]
 
 --STEP 5: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Cumulative_Rounded_&_Targets]
 
 --STEP 6: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Is_Latest]
+DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Is_Latest]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
@@ -788,21 +785,21 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --	   Org_Name,
 --	   Measure_Type
 
---  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Future_Months]
+--  INTO [MHDInternal].[TEMP_CDP_I_IPS_Future_Months]
 
 --FROM (SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
+--		FROM [MHDInternal].[Reference_CDP_Trajectories]
 --	   WHERE CDP_Measure_ID IN('CDP_I01') -- ADD MEASURE IDS FOR LTP TRAJECTORY METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets
 		 
 --	   UNION
 
 --	  SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] 
+--		FROM [MHDInternal].[Reference_CDP_Plans] 
 --	   WHERE CDP_Measure_ID IN('CDP_I01') -- ADD MEASURE IDS FOR PLANNING METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets )_
 
---INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]
+--INSERT INTO [MHDInternal].[STAGING_CDP_I_IPS]
 --SELECT
 --	   f.Reporting_Period,
 --	   0 as Is_Latest,
@@ -830,11 +827,11 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --	   NULL as Plan_Percentage_Achieved_STR,
 --	   GETDATE() as Last_Modified
 
---  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Future_Months] f
+--  FROM [MHDInternal].[TEMP_CDP_I_IPS_Future_Months] f
 
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
+--LEFT JOIN [MHDInternal].[Reference_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
+--LEFT JOIN [MHDInternal].[Reference_CDP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
 --INNER JOIN (SELECT DISTINCT Org_Code, Org_Name, ICB_Code, ICB_Name, Region_Code, Region_Name 
---			  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_I_IPS]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
+--			  FROM [MHDInternal].[STAGING_CDP_I_IPS]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
---DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_I_IPS_Future_Months]
+--DROP TABLE [MHDInternal].[TEMP_CDP_I_IPS_Future_Months]
