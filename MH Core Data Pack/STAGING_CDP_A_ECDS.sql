@@ -8,11 +8,11 @@ MEASURE NAMES:  CDP_A01	ECDS 12hr breaches - Adult (%)
 BACKGROUND INFO: 
 
 INPUT: MHDInternal.Dashboard_UEC_ECDS 
-		[NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+		[Reporting_UKHD_ODS].[Commissioner_Hierarchies]
 		NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies
-		[NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] -- Left in script for continuity, however, unnecessary for this script 
-		[NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] -- Left in script for continuity, however, unnecessary for this script 
-		[NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] -- Left in script for continuity, however, unnecessary for this script 
+		[MHDInternal].[REFERENCE_CDP_LTP_Trajectories] -- Left in script for continuity, however, unnecessary for this script 
+		[MHDInternal].[REFERENCE_CDP_Plans] -- Left in script for continuity, however, unnecessary for this script 
+		[MHDInternal].[REFERENCE_CDP_Standards] -- Left in script for continuity, however, unnecessary for this script 
 
 OUTPUT: NHSE_Sandbox_Policy.dbo.STAGING_CDP_A_ECDS
 
