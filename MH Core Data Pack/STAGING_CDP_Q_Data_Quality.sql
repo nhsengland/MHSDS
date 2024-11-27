@@ -10,14 +10,14 @@ BACKGROUND INFO: [Anything important to know, caveats. Such as when historic dat
 
 INPUT:			 [insert input tables] 
 				 Delete as required
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+				 Reporting_UKHD_ODS.Commissioner_Hierarchies
 				 [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges]
 				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies]
 				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
+				 [MHDInternal].[REFERENCE_CDP_Boundary_Population_Changes]
+				 [MHDInternal].[REFERENCE_CDP_LTP_Trajectories]
+				 [MHDInternal].[REFERENCE_CDP_Plans]
+				 [MHDInternal].[REFERENCE_CDP_Standards]
 
 TEMP TABLES:	 SEE DROPPED TABLES AT END OF THE SCRIPT.
 
@@ -27,6 +27,8 @@ WRITTEN BY:		 [insert your name and date]
 
 UPDATES:		 KIRSTY WALKER 07/12/2023 Change @RPEnd to remove "WHERE Der_CurrentSubmissionWindow = 'Performance'" FOR DEC-23 CHANGE TO SINGLE SUBMISSION WINDOW 
 								          (THERE USE TO BE A PROVISIONAL DATA WINDOW BUT NOW WE JUST PULL OUT MAX REPORTING_PERIOD)
+
+				 LOUISE SHUTTLEWORTH 15/05/24 Migration of script from NCDR to UDAL
 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
@@ -41,18 +43,20 @@ DECLARE @RPStart as DATE
 
 SET @RPStart = '2019-04-01'
 
-SET @RPEnd =  (SELECT MAX([ReportingPeriodEndDate]) FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table])
+SET @RPEnd =  (SELECT MAX([ReportingPeriodEndDate]) FROM [MHDInternal].[STAGING_Data_Quality_Master_Table])
 
 PRINT @RPStart
 PRINT @RPEnd
 
--- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality]
+---- Delete any rows which already exist in output table for this time period
+DELETE FROM [MHDInternal].[STAGING_CDP_Q_Data_Quality]
 WHERE [Reporting_Period] BETWEEN @RPStart AND @RPEnd
 
-/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-STEP 1: WRANGLE THE RAW DATA INTO THE REQUIRED NUMERATOR, DENOMINATOR AND PERCENTAGE TABLES
->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+--/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--STEP 1: WRANGLE THE RAW DATA INTO THE REQUIRED NUMERATOR, DENOMINATOR AND PERCENTAGE TABLES
+-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Pull provider level data
 -- DQ consistency
@@ -71,9 +75,9 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		CAST([MeasureValue] AS FLOAT) AS Measure_Value
 
-		INTO NHSE_Sandbox_Policy.temp.TEMP_CDP_Q_Data_Quality_NEW_Prov
+		INTO MHDInternal.TEMP_CDP_Q_Data_Quality_NEW_Prov
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -98,7 +102,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		CAST([TargetValue] AS FLOAT)  AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -109,7 +113,7 @@ AND Org_Type = 'Provider'
 
 UNION
 
--- DQ Coverage
+---- DQ Coverage
 
 SELECT	
 	   CAST([ReportingPeriodEndDate] AS DATE) AS 'Reporting_Period',
@@ -124,13 +128,12 @@ SELECT
 	   [Region name] AS Region_Name,
 	   'Numerator' AS Measure_Type,
 		CAST(MeasureValue AS FLOAT)  AS Measure_Value
-
 FROM	
-[NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+[MHDInternal].[STAGING_Data_Quality_Master_Table]
 	
 WHERE 	
 Dashboard = 'Submission status - time series'
-AND ([Breakdown category] IN ('Performance', 'Non-Submitter'))
+AND ([Breakdown category] IN ('Performance','Non-Submitter')) ----Rebumission removed JM
 AND [Region code] <> 'Wales'	
 AND [ReportingPeriodEndDate] BETWEEN @RPStart AND @RPEnd
 AND Der_OrgSubmissionStatus <> 'No longer in scope'
@@ -153,11 +156,11 @@ SELECT
 		CAST(DenominatorValue AS FLOAT)  AS Measure_Value
 
 FROM	
-[NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+[MHDInternal].[STAGING_Data_Quality_Master_Table]
 	
 WHERE 	
 Dashboard = 'Submission status - time series'
-AND ([Breakdown category] IN ('Performance', 'Non-Submitter'))
+AND ([Breakdown category] IN ('Performance', 'Non-Submitter')) --Rebumission removed JM
 AND [Region code] <> 'Wales'	
 AND [ReportingPeriodEndDate] BETWEEN @RPStart AND @RPEnd
 AND Der_OrgSubmissionStatus <> 'No longer in scope'
@@ -181,13 +184,14 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
 AND Dashboard = 'Outcomes CQUIN'
 AND [ReportingPeriodEndDate] BETWEEN @RPStart AND @RPEnd
 AND Org_Type = 'Provider'
+
 
 GROUP BY CAST([ReportingPeriodEndDate] AS DATE),
 	   [Provider code],
@@ -213,7 +217,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -247,7 +251,7 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -279,7 +283,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -312,7 +316,7 @@ SELECT
 	   'Score' AS Measure_Type,
 		CAST(MeasureValue AS FLOAT)/100 AS Measure_Value
 
-FROM[NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -337,12 +341,12 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   SUM(Measure_Value) AS [Measure_Value]
 
-	  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
+	  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   LEFT JOIN (SELECT DISTINCT STP_Code, Region_Code, Region_Name 
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) r 
+					  FROM Reporting_UKHD_ODS.Commissioner_Hierarchies) r 
 					    ON [ICB_Code] = r.STP_Code -- NEED TO USE LOOK UP HERE AS IN MPL THERE ARE SOMETIMES MULTILE REGIONS FOR A SINGLE ICB
 
 	   WHERE CDP_Measure_ID NOT IN ('CDP_Q05','CDP_Q04','CDP_Q03')
@@ -373,10 +377,10 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   AVG(CAST(Measure_Value AS FLOAT)) AS [Measure_Value]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   	   LEFT JOIN (SELECT DISTINCT STP_Code, Region_Code, Region_Name 
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) r 
+					  FROM Reporting_UKHD_ODS.Commissioner_Hierarchies) r 
 					    ON [ICB_Code] = r.STP_Code -- NEED TO USE LOOK UP HERE AS IN MPL THERE ARE SOMETIMES MULTILE REGIONS FOR A SINGLE ICB
 
 	   WHERE CDP_Measure_ID = 'CDP_Q05'
@@ -408,7 +412,7 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   SUM(Measure_Value) AS [Measure_Value]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   WHERE CDP_Measure_ID NOT IN ('CDP_Q05','CDP_Q04','CDP_Q03')
 	   AND Org_Type = 'Provider'
@@ -436,7 +440,7 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   AVG(CAST(Measure_Value AS FLOAT)) AS [Measure_Value]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   WHERE CDP_Measure_ID = 'CDP_Q05'
 	   AND Org_Type = 'Provider'
@@ -465,7 +469,7 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   SUM(Measure_Value) AS [Measure_Value]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   WHERE CDP_Measure_ID NOT IN ('CDP_Q05') -- ONLY EXCLUDE DQMI HERE - ALL OTHER METRICS CAN BE AGGREGATED TO ENG 
 	   AND Org_Type = 'Provider'
@@ -491,7 +495,7 @@ SELECT  [Reporting_Period],
 	   [Measure_Type],
 	   AVG(CAST(Measure_Value AS FLOAT)) AS [Measure_Value]
 
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   WHERE CDP_Measure_ID = 'CDP_Q05'
 	   AND Org_Type = 'Provider'
@@ -522,9 +526,9 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-		INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
+		INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -554,7 +558,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -586,7 +590,7 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -616,7 +620,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -650,7 +654,7 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -678,7 +682,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 	[Region code] <> 'Wales'	
@@ -708,7 +712,7 @@ SELECT
 	   'Numerator' AS Measure_Type,
 		SUM(CAST(MeasureValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -736,7 +740,7 @@ SELECT
 	   'Denominator' AS Measure_Type,
 		SUM(CAST(DenominatorValue AS FLOAT) ) AS Measure_Value
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+FROM [MHDInternal].[STAGING_Data_Quality_Master_Table]
 
 WHERE	
 [Region code] <> 'Wales'	
@@ -753,17 +757,17 @@ GROUP BY CAST([ReportingPeriodEndDate] AS DATE),
 
 	   SELECT * 
 
-	   INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master]
+	   INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master]
 	   
-	   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+	   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
 
 	   UNION 
 
-	   SELECT * FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
+	   SELECT * FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
 
 	   UNION
 
-	   SELECT * FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
+	   SELECT * FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
 	   
 
 -- Calculate any percentages needed in the data
@@ -790,13 +794,13 @@ SELECT
 			 END) 
 	    )  as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
   FROM (SELECT * 
-		  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master]
+		  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master]
 		 WHERE Measure_Type = 'Numerator') a
 INNER JOIN 
 	   (SELECT * 
-	      FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master]
+	      FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master]
 		 WHERE Measure_Type = 'Denominator') b  
 		    ON a.Reporting_Period = b.Reporting_Period 
 		   AND a.Org_Code = b.Org_Code 
@@ -806,25 +810,25 @@ INNER JOIN
 -- Collate Percentage calcs with rest of data
 SELECT * 
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master]
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 2: QA - REMOVE UNSUPPORTED ORGS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DELETE FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
+DELETE FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
  WHERE Region_Code LIKE 'REG%' 
 	OR Org_Code IS NULL 
 	OR (Org_Type = 'SubICB' 
-   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL))
-    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL)) 
-	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL))
+   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM Reporting_UKHD_ODS.Commissioner_Hierarchies WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL))
+    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM Reporting_UKHD_ODS.Commissioner_Hierarchies WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL)) 
+	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM Reporting_UKHD_ODS.Commissioner_Hierarchies WHERE NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Effective_To IS NULL))
 
   /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3: ADD IN MISSING SubICBs & ICBs
@@ -840,10 +844,10 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] 
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
+  FROM Reporting_UKHD_ODS.Commissioner_Hierarchies 
  WHERE Effective_To IS NULL 
-   AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+   AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Organisation_Name NOT LIKE '%SUB-ICB REPORTING ENTITY%'
 
 UNION
 
@@ -856,20 +860,20 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+  FROM Reporting_UKHD_ODS.Commissioner_Hierarchies
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
 
 -- Get list of all orgs and indicator combinations
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates]
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
 CROSS JOIN (SELECT DISTINCT 
 				   Reporting_Period, 
 				   CDP_Measure_ID,
 				   CDP_Measure_Name,
 				   Measure_Type 
-			  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All])_
+			  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All])_
 
 -- Find list of only missing rows
 SELECT 
@@ -886,11 +890,11 @@ SELECT
 	   d.Measure_Type,
 	   CAST(NULL as float) as Measure_Value
 
- INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
+ INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
 
- FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates] d
+ FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates] d
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All] e 
    ON d.Reporting_Period = e.Reporting_Period
   AND d.CDP_Measure_ID = e.CDP_Measure_ID  
   AND d.Org_Type = e.Org_Type
@@ -899,9 +903,9 @@ LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All] 
 WHERE e.Org_Code IS NULL
 
 -- Add into data
-INSERT INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
+INSERT INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 5: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
@@ -948,22 +952,22 @@ SELECT DISTINCT
 	   l.LTP_Trajectory_STR,
 	   p.Plan_STR
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All] f
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] l 
+LEFT JOIN [MHDInternal].[REFERENCE_CDP_LTP_Trajectories] l 
     ON f.Reporting_Period = l.Reporting_Period 
    AND f.Org_Code = l.Org_Code 
    AND f.CDP_Measure_ID = l.CDP_Measure_ID
    AND f.Measure_Type = l.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p 
+LEFT JOIN [MHDInternal].[REFERENCE_CDP_Plans] p 
     ON f.Reporting_Period = p.Reporting_Period 
    AND f.Org_Code = p.Org_Code 
    AND f.CDP_Measure_ID = p.CDP_Measure_ID 
    AND f.Measure_Type = p.Measure_Type
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s 
+LEFT JOIN [MHDInternal].[REFERENCE_CDP_Standards] s 
     ON f.Reporting_Period = s.Reporting_Period 
    AND f.CDP_Measure_ID = s.CDP_Measure_ID 
    AND f.Measure_Type = s.Measure_Type
@@ -973,17 +977,17 @@ STEP 6: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
-UPDATE [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality]
+UPDATE [MHDInternal].[STAGING_CDP_Q_Data_Quality]
    SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) as Reporting_Period, CDP_Measure_ID
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
+  INTO [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest] 
+  FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
   GROUP BY CDP_Measure_ID
 
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality]
+INSERT INTO [MHDInternal].[STAGING_CDP_Q_Data_Quality]
 SELECT
 	   f.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -1018,11 +1022,11 @@ SELECT
 	   CAST(Plan_Percentage_Achieved*100 as varchar)+'%' as Plan_Percentage_Achieved_STR,
 	   GETDATE() as Last_Modified
 
-   FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND] f
+   FROM [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest]  i ON f.Reporting_Period = i.Reporting_Period AND f.CDP_Measure_ID = i.CDP_Measure_ID
+LEFT JOIN [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest]  i ON f.Reporting_Period = i.Reporting_Period AND f.CDP_Measure_ID = i.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_Missing_Orgs] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_Q_Data_Quality_Missing_Orgs] e 
   ON  f.Reporting_Period = e.Reporting_Period
  AND f.CDP_Measure_ID = e.CDP_Measure_ID 
  AND f.Org_Type = e.Org_Type
@@ -1050,7 +1054,7 @@ SELECT DISTINCT
 			   Org_Type,
 			   Org_Code,
 			   count(1) cnt
-		 FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality]
+		 FROM [MHDInternal].[STAGING_CDP_Q_Data_Quality]
          GROUP BY 
 		 Reporting_Period,
 		 CDP_Measure_ID,
@@ -1069,8 +1073,8 @@ SELECT DISTINCT
 -- SNOMED AND OUTCOMES CAN MONITOR LIKE USUAL?
 
 
-SELECT Latest_Reporting_Period, 
-	   Previous_Reporting_Period, 
+SELECT Cast(Latest_Reporting_Period as date) as Latest_Reporting_Period,
+		Cast(Previous_Reporting_Period as date) as Previous_Reporting_Period,
 	   CDP_Measure_ID, 
 	   CDP_Measure_Name, 
 	   Measure_Type,
@@ -1116,13 +1120,12 @@ SELECT
 			ELSE -- percentage point change if comparing percentages
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),1)
 	   END as Percentage_Change
+FROM [MHDInternal].[STAGING_CDP_Q_Data_Quality] latest
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality] latest
-
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN [MHDInternal].[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality] previous
+  LEFT JOIN [MHDInternal].[STAGING_CDP_Q_Data_Quality] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -1138,25 +1141,22 @@ ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality]
+  FROM [MHDInternal].[STAGING_CDP_Q_Data_Quality]
   WHERE Measure_Value IS NOT NULL
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 8: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
-  DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest] 
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Prov]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Agg]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_GPPostcodeAgg]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Percentages]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_All]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List_Dates]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Org_List]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_Missing_Orgs]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_RND]
+  DROP TABLE [MHDInternal].[TEMP_CDP_Q_Data_Quality_NEW_Master_Is_Latest] 
 
-
- 
- select * from [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_Q_Data_Quality] where measure_type = 'denominator'
