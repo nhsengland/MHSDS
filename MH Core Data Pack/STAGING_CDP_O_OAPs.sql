@@ -12,20 +12,20 @@ MEASURE DESCRIPTION(s):
 BACKGROUND INFO: Publication contains ONS (E) codes. Some codes not currently available in reference tables so are hardcoded, details below.
 				 There is one month where the question name wording is slightly different (July 2019)
 
-INPUT:			 [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_STP_Codes]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
+INPUT:			 [UKHF_Mental_Health].[Out_Of_Area_Placements1]
+				 [UKHD_ODS].[STP_Names_And_Codes_England_SCD]
+				 [Internal_Reference].[ComCodeChanges]
+				 [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+				 [Reporting_UKHD_ODS].[Provider_Hierarchies]
+				 [Internal_Reference].[Provider_Successor]
+				 [MHDInternal].[Reference_CDP_Boundary_Population_Changes]
+				 [MHDInternal].[Reference_CDP_Trajectories]
+				 [MHDInternal].[Reference_CDP_Plans]
+				 [MHDInternal].[Reference_CDP_Standards]
 
 TEMP TABLES:	 SEE DROPPED TABLES AT END OF THE SCRIPT.
 
-OUTPUT:			 [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+OUTPUT:			 [MHDInternal].[STAGING_CDP_O_OAPs]
 
 WRITTEN BY:		 Jade Sykes 25/5/23
 
@@ -41,15 +41,20 @@ PRE STEPS
 
 DECLARE @RPEnd AS DATE
 DECLARE @RPStart AS DATE
+DECLARE @PreviousEOY as Date  ---Used to calculate standards - see step 6
 
-SET @RPEnd = (SELECT MAX(Publication_Period_End) FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1])
-SET @RPStart = @RPEnd 
+SET @RPEnd = (SELECT MAX(REPORTING_PERIOD_END) FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1)-- These can be manually changed when refreshing for end of financial year refresh
+
+SET @RPStart =@RPEnd -- This can be manually changed when refreshing for end of financial year refresh '2022-04-01' 
+
+SET @PreviousEOY=EOMONTH(CASE WHEN  MONTH(@RPEnd)>3 Then DATEADD(MONTH,-1*(MONTH(@RPEnd)-3),@RPEnd) ELSE DATEADD(MONTH,-1*(MONTH(@RPEnd)+9),@RPEnd) END,0)
 
 PRINT @RPStart
 PRINT @RPEnd
+PRINT @PreviousEOY
 
--- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+---- Delete any rows which already exist in output table for this time period
+DELETE FROM [MHDInternal].[STAGING_CDP_O_OAPs] 
 WHERE [Reporting_Period] BETWEEN @RPStart AND @RPEnd
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -58,180 +63,166 @@ STEP 1: CREATE MASTER TABLE
 
 --Provider
 SELECT 
-	   Publication_Period_End as Reporting_Period,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-			THEN 'CDP_O01'
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'CDP_O02'
-	   END as CDP_Measure_ID,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-			THEN 'OAPs Bed Days (inappropriate only)' 
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'OAPs started in period (inappropriate only)'
+	   Reporting_Period_End as Reporting_Period,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+		 END AS CDP_Measure_ID,
+
+	   CASE WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
+
 	  END as CDP_Measure_Name,
+
 	  'Provider' as Org_Type,
-	  Breakdown1Code as Org_Code,
+	  Primary_Level as Org_Code,
 	  'Count' as Measure_Type,
-	  [Value] as Measure_Value
+	  Metric_Value as Measure_Value
 
- INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Raw]
+INTO [MHDInternal].[TEMP_CDP_O_OAPs_Raw]
 
- FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1 oap
 
-WHERE Question IN ('Total number of inappropriate OAP days over the period','Inappropriate OAPs started in period','Inappropriate out of area placements started in period','Total number of inappropriate out of area placement days over the period')
-  AND Breakdown1 = 'SendingProvider'
-  AND Effective_Snapshot_Date BETWEEN @RPStart AND @RPEnd
-  AND Report_Period_Length = 'quarterly'
-  AND Breakdown1Code not in ('999','England')
+INNER JOIN [Reporting_UKHD_ODS].[Provider_Hierarchies] ph ON oap.Primary_Level = ph.Organisation_Code COLLATE database_default --only bring through providers in the [Provider_Hierarchies] table
+
+WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
+
+  AND Breakdown = 'Sending Provider'
+  AND Reporting_Period_End BETWEEN @RPStart AND @RPEnd
+  AND Report_Period_Length = 'Quarterly'
+  AND ph.NHSE_Organisation_Type NOT LIKE '%SITE%' --Exclude provider sites from the reporting
+  AND ph.NHSE_Organisation_Type NOT IN ('LOCAL HEALTH BOARD','PRESCRIBING COST CENTRE','UNKNOWN') --Exclude these provider types from the reporting
 
 UNION
 
  --SubICB
 SELECT 
-	   Publication_Period_End as Reporting_Period,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-			THEN 'CDP_O01'
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'CDP_O02'
-	   END as CDP_Measure_ID,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-			THEN 'OAPs Bed Days (inappropriate only)' 
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'OAPs started in period (inappropriate only)'
+	   Reporting_Period_End as Reporting_Period,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+		 END AS CDP_Measure_ID,
+
+	   CASE WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
 	  END as CDP_Measure_Name,
+
 	  'SubICB' as Org_Type,
 	  CASE WHEN o.New_Code IS NULL 
-		   THEN Breakdown1Code COLLATE SQL_Latin1_General_CP1_CI_AS 
+		   THEN oap.Primary_Level COLLATE SQL_Latin1_General_CP1_CI_AS 
 		   ELSE o.New_Code 
 	  END as Org_Code,
 	  'Count' as Measure_Type,
-	  SUM(Value) as Measure_Value
+	  SUM(Metric_Value) as Measure_Value
 
-  FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1] oap
+ FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1 oap
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] o
-ON oap.Breakdown1Code = o.Org_Code COLLATE SQL_Latin1_General_CP1_CI_AS
+LEFT JOIN [Internal_Reference].[ComCodeChanges] o ON oap.Primary_Level = o.Org_Code COLLATE SQL_Latin1_General_CP1_CI_AS
 
-WHERE Question IN ('Total number of inappropriate OAP days over the period','Inappropriate OAPs started in period','Inappropriate out of area placements started in period','Total number of inappropriate out of area placement days over the period')
-  AND Breakdown1 IN( 'CCG','Sub-ICB')
-  AND Effective_Snapshot_Date BETWEEN @RPStart AND @RPEnd
-  AND Report_Period_Length = 'quarterly'
-  AND Breakdown1Code NOT IN ('999','England')
+WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
+  AND Breakdown = 'Sub ICB of GP Practice or Residence'
+  AND Reporting_Period_End BETWEEN @RPStart AND @RPEnd
+  AND Report_Period_Length = 'Quarterly'
+  --AND Breakdown not in ('999','England')
 
-GROUP BY 
-Publication_Period_End,
-CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-	 THEN 'CDP_O01'
-	 WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-	 THEN 'CDP_O02'
-END,
-CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-	 THEN 'OAPs Bed Days (inappropriate only)' 
-	 WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-	 THEN 'OAPs started in period (inappropriate only)'
-END,
-CASE WHEN o.New_Code IS NULL 
-	 THEN Breakdown1Code COLLATE SQL_Latin1_General_CP1_CI_AS 
-	 ELSE o.New_Code 
-END
+GROUP BY 	   
+	Reporting_Period_End,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+			END,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
+			END,
+	  CASE 
+			WHEN o.New_Code IS NULL 
+			THEN oap.Primary_Level COLLATE SQL_Latin1_General_CP1_CI_AS 
+			ELSE o.New_Code 
+			END
 
 UNION
 
 -- ICB
--- Some ICB codes changed from April 2020. The new codes (ending 50+) are currently not present in the reference table. I've added both versions of the code in the CASE WHEN statement
--- Incase the reference table is updated and old codes are lost.
 SELECT 
-	   Publication_Period_End as Reporting_Period,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-			THEN 'CDP_O01'
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'CDP_O02'
-	   END as CDP_Measure_ID,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-			THEN 'OAPs Bed Days (inappropriate only)' 
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'OAPs started in period (inappropriate only)'
-	   END as CDP_Measure_Name,
-	   'ICB' as Org_Type,
-	   CASE WHEN Breakdown1Code IN ('E54000050','e54000049') 
-			THEN 'QHM'
-			WHEN Breakdown1Code IN ('E54000051','E54000006') 
-			THEN 'QOQ'
-			WHEN Breakdown1Code IN ('E54000052','E54000035') 
-			THEN 'QXU'
-			WHEN Breakdown1Code IN ('E54000053','E54000033') 
-			THEN 'QNX'
-			WHEN Breakdown1Code IN ('E54000054','E54000005') 
-			THEN 'QWO'
-			ELSE STP_Code_ODS COLLATE SQL_Latin1_General_CP1_CI_AS 
-	   END as Org_Code,
-	   'Count' as Measure_Type,
-	   [Value] as Measure_Value
+	   Reporting_Period_End as Reporting_Period,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+		 END AS CDP_Measure_ID,
 
-  FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+	   CASE WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
+	  END as CDP_Measure_Name,
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_STP_Codes] ON Breakdown1Code = STP_Code_ONS COLLATE SQL_Latin1_General_CP1_CI_AS
+	  'ICB' as Org_Type,
+	  Primary_Level AS Org_Code,
+	  'Count' as Measure_Type,
+	  Metric_Value as Measure_Value
 
-WHERE Question IN ('Total number of inappropriate OAP days over the period','Inappropriate OAPs started in period','Inappropriate out of area placements started in period','Total number of inappropriate out of area placement days over the period')
-  AND Breakdown1 IN( 'STP','ICB')
-  AND Effective_Snapshot_Date BETWEEN @RPStart AND @RPEnd
-  AND Report_Period_Length = 'quarterly'
-  AND Breakdown1Code NOT IN ('999','England')
+FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1 oap
+
+--LEFT JOIN [UKHD_ODS].[STP_Names_And_Codes_England_SCD] s ON oap.Primary_Level = s.STP_Code COLLATE SQL_Latin1_General_CP1_CI_AS
+
+WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
+  AND Breakdown = 'ICB of GP Practice or Residence'
+  AND Reporting_Period_End BETWEEN @RPStart AND @RPEnd
+  AND Report_Period_Length = 'Quarterly'
+  
 
 UNION
 
  --Region
 SELECT 
-	   Publication_Period_End as Reporting_Period,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-			THEN 'CDP_O01'
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'CDP_O02'
-	   END as CDP_Measure_ID,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-			THEN 'OAPs Bed Days (inappropriate only)' 
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'OAPs started in period (inappropriate only)'
-	   END as CDP_Measure_Name,
-	   'Region' as Org_Type,
-	   Breakdown1Code as Org_Code,
-	   'Count' as Measure_Type,
-	   [Value] as Measure_Value
+	   Reporting_Period_End as Reporting_Period,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+		 END AS CDP_Measure_ID,
 
-  FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+	   CASE WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
+	  END as CDP_Measure_Name,
 
-WHERE Question IN ('Total number of inappropriate OAP days over the period','Inappropriate OAPs started in period','Inappropriate out of area placements started in period','Total number of inappropriate out of area placement days over the period')
-  AND Breakdown1 = 'Region'
-  AND Effective_Snapshot_Date BETWEEN @RPStart AND @RPEnd
-  AND Report_Period_Length = 'quarterly'
-  AND Breakdown1Code NOT IN ('999','England')
+	  'Region' as Org_Type,
+	  Primary_Level AS Org_Code,
+	  'Count' as Measure_Type,
+	  Metric_Value as Measure_Value
+
+FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1 oap
+
+WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
+  AND Breakdown = 'Commissioning Region'
+  AND Reporting_Period_End BETWEEN @RPStart AND @RPEnd
+  AND Report_Period_Length = 'Quarterly'
+
 
 UNION 
 
  --England
 SELECT 
-	   Publication_Period_End as Reporting_Period,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period')
-			THEN 'CDP_O01'
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'CDP_O02'
-	   END as CDP_Measure_ID,
-	   CASE WHEN Question IN ('Total number of inappropriate OAP days over the period','Total number of inappropriate out of area placement days over the period') 
-			THEN 'OAPs Bed Days (inappropriate only)' 
-			WHEN Question IN ('Inappropriate OAPs started in period','Inappropriate out of area placements started in period') 
-			THEN 'OAPs started in period (inappropriate only)'
-	   END as CDP_Measure_Name,
-	   'England' as Org_Type,
-	   'ENG' as Org_Code,
-	   'Count' as Measure_Type,
-	   [Value] as Measure_Value
+	   Reporting_Period_End as Reporting_Period,
+	   CASE 
+			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
+		 END AS CDP_Measure_ID,
 
-  FROM [NHSE_UKHF].[Mental_Health].[vw_Out_Of_Area_Placements1]
+	   CASE WHEN Metric = 'OAP02a' THEN 'OAPs Bed Days (inappropriate only)' --CHECK?
+			WHEN Metric = 'OAP03a' THEN 'OAPs active at the end of the period (inappropriate only)'--CHECK?
+	  END as CDP_Measure_Name,
+	  'England' as Org_Type,
+	  'ENG' AS Org_Code,
+	  'Count' as Measure_Type,
+	  Metric_Value as Measure_Value
 
-WHERE Question IN ('Total number of inappropriate OAP days over the period','Inappropriate OAPs started in period','Inappropriate out of area placements started in period','Total number of inappropriate out of area placement days over the period')
-  AND Breakdown1 = 'England'
-  AND Effective_Snapshot_Date BETWEEN @RPStart AND @RPEnd
-  AND Report_Period_Length = 'quarterly'
+FROM UKHF_Mental_Health.Monthly_MHSDS_Out_Of_Area_Placements1 oap
+
+WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
+
+  AND Breakdown = 'England'
+  AND Reporting_Period_End BETWEEN @RPStart AND @RPEnd
+  AND Report_Period_Length = 'Quarterly'
+
 
 -- Code for pulling org names from reference tables
 SELECT 
@@ -284,27 +275,27 @@ SELECT
 	   Measure_Type,
 	   SUM(Measure_Value) AS Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Master]
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Raw] m
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Raw] m
 
 --Region names
 LEFT JOIN (SELECT DISTINCT Region_Code, Region_Name 
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) r 
+					  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) r 
 					    ON Org_Code = r.Region_Code COLLATE database_default
 
 --ICB hierarchies
 LEFT JOIN (SELECT DISTINCT STP_Code, STP_Name, Region_Code, Region_Name
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) i
+					  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]) i
 					    ON Org_Code = i.STP_Code COLLATE database_default
 
 --SubICB hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON m.Org_Code = cc.Org_Code COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, m.Org_Code) = ch.Organisation_Code COLLATE database_default
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON m.Org_Code = cc.Org_Code COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, m.Org_Code) = ch.Organisation_Code COLLATE database_default
 
 --Provider hierarchies, replacing old codes with new codes and then looking up new codes in hierarchies table
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_Provider_Successor] ps on m.Org_Code = ps.Prov_original COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, m.Org_Code) = ph.Organisation_Code COLLATE database_default
+LEFT JOIN [Internal_Reference].[Provider_Successor] ps on m.Org_Code = ps.Prov_original COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Provider_Hierarchies] ph ON COALESCE(ps.Prov_Successor, m.Org_Code) = ph.Organisation_Code COLLATE database_default
 
 GROUP BY Reporting_Period,
 	   CDP_Measure_ID,
@@ -370,9 +361,9 @@ SELECT
        Measure_Type collate database_default as Measure_Type,
        CAST(Measure_Value as float) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master_2]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Master_2]
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Master]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 2: REALLOCATIONS
@@ -383,8 +374,8 @@ STEP 2: REALLOCATIONS
 -- Reallocations Data
 -- Use this for if Bassetlaw_Indicator = 1
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master_2]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Master_2]
 
  WHERE Org_Code IN('01Y','06H','71E','D2P2L','QF7','Y63','QJM','QOP','Y62','QUA','QUE','Y61','15M','78H','03W','15E','QT1','Y60','QK1','QJ2','QHL','QPM') 
    AND Reporting_Period <'2022-07-01'
@@ -392,8 +383,8 @@ SELECT *
 --No change data
 -- Use this for if Bassetlaw_Indicator = 1
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_No_Change]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master_2]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Master_2]
  WHERE Reporting_Period >='2022-07-01' 
     OR (Org_Code NOT IN('01Y','06H','71E','D2P2L','QF7','Y63','QJM','QOP','Y62','QUA','QUE','Y61','15M','78H','03W','15E','QT1','Y60','QK1','QJ2','QHL','QPM') 
 	AND Reporting_Period <'2022-07-01' )
@@ -409,10 +400,10 @@ SELECT
 	   r.Measure_Value * Change as Measure_Value_Change,
 	   [Add]
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_From]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_From]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
+INNER JOIN [MHDInternal].[Reference_CDP_Boundary_Population_Changes] c ON r.Org_Code = c.[From]
  WHERE Bassetlaw_Indicator = 1	--change depending on Bassetlaw mappings (0 or 1)
 
 -- Sum activity movement for orgs gaining (need to sum for Midlands Y60 which recieves from 2 orgs)
@@ -425,8 +416,8 @@ SELECT
 	   r.Measure_Type,
 	   SUM(Measure_Value_Change) as Measure_Value_Change
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_From] r
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_From] r
 
 GROUP BY 
 r.Reporting_Period,
@@ -452,10 +443,10 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value - Measure_Value_Change as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Final]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations] r
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Final]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_From] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_From] c 
         ON r.Org_Code = c.Org_Code 
        AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -478,9 +469,9 @@ SELECT
 	   r.Measure_Type,
 	   r.Measure_Value + Measure_Value_Change as Measure_Value
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations] r
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations] r
 
-INNER JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add] c 
+INNER JOIN [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add] c 
         ON r.Org_Code = c.Org_Code 
 	   AND r.Reporting_Period = c.Reporting_Period 
 	   AND r.Measure_Type = c.Measure_Type 
@@ -488,13 +479,13 @@ INNER JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_Ad
 
 --Collate reallocations with no change data to create new 'master' table
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Final]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Final]
 
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_No_Change]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_No_Change]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3: ADD IN MISSING SubICBs & ICBs
@@ -510,10 +501,11 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List]
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] 
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Org_List]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] 
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+   AND Organisation_Name NOT LIKE '%REPORTING ENTITY'
 
 UNION
 
@@ -526,20 +518,20 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
 
 -- Get list of all orgs and indicator combinations
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List_Dates]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Org_List_Dates]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Org_List]
 CROSS JOIN (SELECT DISTINCT 
 				   Reporting_Period, 
 				   CDP_Measure_ID,
 				   CDP_Measure_Name,
 				   Measure_Type 
-			  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated])_
+			  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated])_
 
 -- Find list of only missing rows
 SELECT 
@@ -556,11 +548,11 @@ SELECT
 	   d.Measure_Type,
 	   CAST(NULL as float) as Measure_Value
 
- INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Missing_Orgs]
+ INTO [MHDInternal].[TEMP_CDP_O_OAPs_Missing_Orgs]
 
- FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List_Dates] d
+ FROM [MHDInternal].[TEMP_CDP_O_OAPs_Org_List_Dates] d
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated] e 
    ON d.Reporting_Period = e.Reporting_Period
   AND d.CDP_Measure_ID = e.CDP_Measure_ID  
   AND d.Org_Type = e.Org_Type
@@ -569,9 +561,9 @@ LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated] e
 WHERE e.Org_Code IS NULL
 
 -- Add into data
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated]
+INSERT INTO [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated]
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Missing_Orgs]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Missing_Orgs]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 4: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
@@ -590,21 +582,21 @@ SELECT DISTINCT
 	   f.Region_Name,
 	   f.Measure_Type,
 	   ROUND(f.Measure_Value,0) AS Measure_Value,
-	   s.[Standard],
+	   s.[Standard], --CDP_O02 Standards are not included in then [MHDInternal].[Reference_CDP_Standards] table as they are calculated for organistions based on previous EOY measure value SEE STEP 6
 	   l.LTP_Trajectory_Rounded AS LTP_Trajectory,
 	   NULL AS LTP_Trajectory_Percentage_Achieved, -- Lower is better so not used for OAPs
 	   p.[Plan_Rounded] AS [Plan],
 	   NULL AS Plan_Percentage_Achieved, -- Lower is better so not used for OAPs
 	   CASE WHEN s.Standard_STR IS NULL THEN CAST(NULL AS VARCHAR) ELSE s.Standard_STR END AS Standard_STR,
-	   CASE WHEN l.LTP_Trajectory_STR IS NULL THEN CAST(NULL AS VARCHAR) ELSE l.LTP_Trajectory_STR END AS LTP_Trajectory_STR,
+	    CASE WHEN l.LTP_Trajectory_STR IS NULL THEN CAST(NULL AS VARCHAR) ELSE l.LTP_Trajectory_STR END AS LTP_Trajectory_STR,
 	   CASE WHEN p.Plan_STR IS NULL THEN CAST(NULL AS VARCHAR) ELSE p.Plan_STR END AS Plan_STR
 	   
 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Measures_&_targets]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets]
   
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated] f
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] l 
+LEFT JOIN [MHDInternal].[Reference_CDP_LTP_Trajectories] l 
     ON f.Reporting_Period = l.Reporting_Period 
    AND f.Org_Code = l.Org_Code 
    AND (CASE WHEN f.Measure_Type IN ('Percentage','Rate','Count') 
@@ -612,7 +604,7 @@ LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories] l
 			 ELSE NULL 
 		END)= l.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p 
+LEFT JOIN [MHDInternal].[Reference_CDP_Plans] p 
     ON f.Reporting_Period = p.Reporting_Period 
    AND f.Org_Code = p.Org_Code 
    AND (CASE WHEN f.Measure_Type IN ('Percentage','Rate','Count') 
@@ -620,7 +612,7 @@ LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p
 			 ELSE NULL 
 	   END) = p.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s 
+LEFT JOIN [MHDInternal].[Reference_CDP_Standards] s 
     ON f.Reporting_Period = s.Reporting_Period 
    AND (CASE WHEN f.Measure_Type  IN ('Percentage','Rate','Count') 
 			 THEN f.CDP_Measure_ID 
@@ -631,16 +623,17 @@ LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s
 STEP 5: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
--- Set Is_Latest in current table as 0
-UPDATE [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+ --Set Is_Latest in current table as 0
+UPDATE [MHDInternal].[STAGING_CDP_O_OAPs]
    SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) as Reporting_Period 
-  INTO [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Is_Latest]
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Measures_&_targets]
+  INTO [MHDInternal].[TEMP_CDP_O_OAPs_Is_Latest]
+  FROM [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets]
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+
+INSERT INTO [MHDInternal].[STAGING_CDP_O_OAPs]
 SELECT
 	   f.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -674,20 +667,47 @@ SELECT
 	   CAST(NULL as varchar)+'%' as Plan_Percentage_Achieved_STR,
 	   GETDATE() as Last_Modified
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Measures_&_targets] f
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Is_Latest] i ON f.Reporting_Period = i.Reporting_Period
+  
+FROM [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets] f
+
+LEFT JOIN [MHDInternal].[TEMP_CDP_O_OAPs_Is_Latest] i ON f.Reporting_Period = i.Reporting_Period
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-STEP 6: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
+STEP 6: Add standards which are calculated rather than using refrence tables
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+--Create standards table using previous EOY March Measure_Value
+SELECT DISTINCT reporting_period,org_code,CDP_MEASURE_ID,MEASURE_TYPE, measure_value [STANDARD], MEASURE_VALUE_STR Standard_str into [MHDInternal].[Temp_oap_standard]
+FROM  [MHDInternal].[STAGING_CDP_O_OAPs] 
+WHERE reporting_period=@PreviousEOY
+AND CDP_MEASURE_ID ='CDP_o02'
+AND measure_TYPE='Count'
+AND org_type in ('ICB', 'ENGLAND','SUBICB','England','Region')
+--Update standard and standard_str
+UPDATE [MHDInternal].[STAGING_CDP_O_OAPs] 
+SET [standard]=[MHDInternal].[Temp_oap_standard].[STANDARD],
+    standard_str=[MHDInternal].[Temp_oap_standard].Standard_str
+FROM [MHDInternal].Temp_oap_standard
+WHERE [MHDInternal].[STAGING_CDP_O_OAPs].org_code =[MHDInternal].Temp_oap_standard.org_code
+AND  [MHDInternal].[STAGING_CDP_O_OAPs].CDP_MEASURE_ID =[MHDInternal].Temp_oap_standard.CDP_MEASURE_ID
+AND  [MHDInternal].[STAGING_CDP_O_OAPs].Measure_Type =[MHDInternal].Temp_oap_standard.Measure_Type 
+AND [MHDInternal].[STAGING_CDP_O_OAPs].reporting_period>[MHDInternal].Temp_oap_standard.reporting_period
+AND [MHDInternal].[STAGING_CDP_O_OAPs].reporting_period=@RPEnd
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+STEP 7: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DELETE FROM [MHDInternal].[STAGING_CDP_O_OAPs]
  WHERE Region_Code LIKE 'REG%' OR Org_Code IS NULL
 	OR (Org_Type = 'SubICB' 
-   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
-    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
-	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+   AND Org_Code NOT IN (SELECT DISTINCT Organisation_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE Effective_To IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
+    OR (Org_Type = 'ICB' AND Org_Code NOT IN (SELECT DISTINCT STP_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP')) 
+	OR (Org_Type = 'Region' AND Org_Code NOT IN (SELECT DISTINCT Region_Code FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] WHERE [Effective_To] IS NULL AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'))
 
 -- Check for duplicate rows, this should return a blank table if none
 SELECT DISTINCT 
@@ -704,7 +724,7 @@ SELECT DISTINCT
 			   Org_Type,
 			   Org_Code,
 			   count(1) cnt
-		 FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+		 FROM [MHDInternal].[STAGING_CDP_O_OAPs]
          GROUP BY 
 		 Reporting_Period,
 		 CDP_Measure_ID,
@@ -763,12 +783,12 @@ SELECT
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),1)
 	   END as Percentage_Change
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs] latest
+  FROM [MHDInternal].[STAGING_CDP_O_OAPs] latest
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN [MHDInternal].[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs] previous
+  LEFT JOIN [MHDInternal].[STAGING_CDP_O_OAPs] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -784,36 +804,57 @@ ORDER BY QA_Flag, CDP_Measure_Name, Org_Name, Org_Type, Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+  FROM [MHDInternal].[STAGING_CDP_O_OAPs]
   WHERE Measure_Value IS NOT NULL
 
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-STEP 7: DROP TEMP TABLES
+STEP 8: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 --STEP 1: CREATE MASTER TABLE
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Raw]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Master_2]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Raw]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Master]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Master_2]
 
 --STEP 2: REALLOCATIONS
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_No_Change]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_From]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocations_Final]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Reallocated]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_No_Change]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_From]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Changes_Add]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Reallocations_Final]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Reallocated]
 
 --STEP 3: ADD IN MISSING SubICBs & ICBs
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List_Dates]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Org_List]
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Missing_Orgs]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Org_List_Dates]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Org_List]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Missing_Orgs]
 
 --STEP 4: ROUNDING & SUPRESSION (WHERE REQUIRED), ADDING TARGETS, % ACHIEVED
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Measures_&_targets]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 --STEP 5: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
-DROP TABLE [NHSE_Sandbox_Policy].[dbo].[TEMP_CDP_O_OAPs_Is_Latest]
+DROP TABLE [MHDInternal].[TEMP_CDP_O_OAPs_Is_Latest]
+---STEP 6: ADD CALCLTATED STANDARDS
+DROP TABLE [MHDInternal].Temp_oap_standard
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
@@ -842,18 +883,18 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_O_OAPs_Future_Months]
 
 --FROM (SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]
+--		FROM [MHDInternal].[Reference_CDP_Trajectories]
 --	   WHERE CDP_Measure_ID IN('CDP_O01') -- ADD MEASURE IDS FOR LTP TRAJECTORY METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets
 		 
 --	   UNION
 
 --	  SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
---		FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] 
+--		FROM [MHDInternal].[Reference_CDP_Plans] 
 --	   WHERE CDP_Measure_ID IN('CDP_O01') -- ADD MEASURE IDS FOR PLANNING METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets )_
 
---INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]
+--INSERT INTO [MHDInternal].[STAGING_CDP_O_OAPs]
 --SELECT
 --	   f.Reporting_Period,
 --	   0 as Is_Latest,
@@ -883,10 +924,23 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 
 --  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_O_OAPs_Future_Months] f
 
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
---LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
+--LEFT JOIN [MHDInternal].[Reference_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
+--LEFT JOIN [MHDInternal].[Reference_CDP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
 --INNER JOIN (SELECT DISTINCT Org_Code, Org_Name, ICB_Code, ICB_Name, Region_Code, Region_Name 
---			  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_O_OAPs]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
+--			  FROM [MHDInternal].[STAGING_CDP_O_OAPs]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
 --DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_O_OAPs_Future_Months]
 
+
+--DROP TABLE IF exists [MHDInternal].[TEMP_CDP_O02_STANDARDS]
+
+--SELECT DISTINCT Org_Code, cast(Measure_Value as int)[Standard], 
+--						CASE WHEN measure_value_str='*' THEN  '*' ELSE cast(cast(Measure_Value as int) as varchar) end Standard_STR,
+--						RANK() OVER (PARTITION BY org_Code ORDER BY Coalesce([standard],0) desc ) AS RN
+--						into [MHDInternal].[TEMP_CDP_O02_STANDARDS]
+--					  FROM MHDInternal.STAGING_CDP_O_OAPs
+--					  WHERE reporting_period='2024-03-31'
+--					  and cdp_measure_id='CDP_o02'
+--					  and standard_STR is not null
+
+--DROP TABLE IF exists [MHDInternal].[TEMP_CDP_O02_STANDARDS]
