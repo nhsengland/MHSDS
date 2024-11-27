@@ -73,25 +73,29 @@ PRE-STEPS
 
 --USE [mesh_IAPT]
 
+
 DECLARE @Period_Start DATE
 DECLARE @Period_End DATE
+DECLARE @Period_Start_YTD DATE
 
 SET @Period_Start = (SELECT DATEADD(MONTH,0,MAX([ReportingPeriodStartDate])) FROM [mesh_IAPT].[IDS000header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
 SET @Period_End = (SELECT EOMONTH(DATEADD(MONTH,0,MAX([ReportingPeriodEndDate]))) FROM [mesh_IAPT].[IDS000header]) --change the 0 to -[number of months] if you want to update any old months data for some reason
+SET @Period_Start_YTD =  DATEADD(DAY,1,EOMONTH(CASE WHEN  MONTH(@Period_End)>3 Then DATEADD(MONTH,-1*(MONTH(@Period_End)-3),@Period_End) ELSE DATEADD(MONTH,-1*(MONTH(@Period_End)+9),@Period_End) END,0))--NO ADJSUTMENT REQUIRED IF RE-RUNNING PREVIOUS MONTHS
+
 PRINT @Period_Start
+PRINT @Period_Start_YTD
 PRINT @Period_End
 
 -- Delete any rows which already exist in output table for this time period
-DELETE FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]  
+DELETE FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly] 
 WHERE [Reporting_Period] BETWEEN @Period_Start AND @Period_End
-
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 1: CREATE MASTER TABLE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- ADD ENGLAND FIGURES
-SELECT h.ReportingPeriodEndDate AS Reporting_Period,
+SELECT @Period_End AS Reporting_Period,
 	   'England' AS Org_Type,
 	   'ENG' AS 'Org_Code',
 	   'England' AS 'Org_Name',
@@ -111,17 +115,17 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
 							THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
 		-- NHS Talking Therapies 6 Week Waits
-		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
 		-- NHS Talking Therapies 18 Week Waits
-		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End  AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
 		-- NHS Talking Therapies 1st-2nd Treatment >90 days
-		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
+		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
 		COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
@@ -140,7 +144,10 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
 		-- NHS Talking Therapies Finishing a Course of Treatment 
 		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
-							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count',
+		-- NHS Talking Therapies Finishing a Course of Treatment YTD
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate]  AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID+Cast(r.ServDischDate as varchar) ELSE NULL END) AS 'CDP_B09 Count' 
 
    INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
 
@@ -150,16 +157,15 @@ INNER JOIN [mesh_IAPT].[IDS001mpi] p ON r.recordnumber = p.recordnumber
 INNER JOIN [mesh_IAPT].[IDS000header] h ON r.UniqueSubmissionID = h.UniqueSubmissionID
 INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.UniqueSubmissionID AND r.AuditId = i.AuditId
 
-WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start_YTD) AND @Period_End
   AND UsePathway_Flag = 'True'
-  AND i.IsLatest = '1' 
-
-GROUP BY h.[ReportingPeriodEndDate]
+  AND i.IsLatest = '1'
+--group by r.pathwayid
 
 UNION
 -- ADD REGIONAL FIGURES
 
-SELECT h.ReportingPeriodEndDate AS Reporting_Period,
+SELECT @Period_End AS Reporting_Period,
 	   'Region' AS Org_Type,
 	   Region_Code AS Org_Code,
 	   Region_Name AS Org_Name,
@@ -171,25 +177,27 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   ---- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
-						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END)
-	   - 
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
-	   -- NHS Talking Therapies 6 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
-	   -- NHS Talking Therapies 18 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate]) <=126 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
-	   -- NHS Talking Therapies 1st-2nd Treatment >90 days
-	   COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
-	   COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
+							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END)
+		- 
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
+		-- NHS Talking Therapies 6 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
+		-- NHS Talking Therapies 18 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End  AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
+		-- NHS Talking Therapies 1st-2nd Treatment >90 days
+		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
+		COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
 		-- NHS Talking Therapies Reliable Recovery
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B06 Numerator',
@@ -205,7 +213,10 @@ SELECT h.ReportingPeriodEndDate AS Reporting_Period,
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
 		-- NHS Talking Therapies Finishing a Course of Treatment 
 		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
-							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count',
+		-- NHS Talking Therapies Finishing a Course of Treatment YTD
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate]  AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID+Cast(r.ServDischDate as varchar) ELSE NULL END) AS 'CDP_B09 Count' 
 
 FROM [mesh_IAPT].[IDS101referral] r
 
@@ -216,21 +227,21 @@ INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.Uni
 LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
 LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
-WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+ Where h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start_YTD) AND @Period_End
   AND UsePathway_Flag = 'True'
   AND i.IsLatest = '1'
   AND Effective_to IS NULL
 
 GROUP BY 
-h.ReportingPeriodEndDate, 
 Region_Code, 
 Region_Name
+
 
 UNION
 --ADD ICB FIGURES
 
 SELECT
-	   h.ReportingPeriodEndDate AS Reporting_Period,
+	   @Period_End AS Reporting_Period,
 	   'ICB' AS Org_Type,
 	   STP_Code AS 'Org_Code',
 	   STP_Name AS 'Org_Name',
@@ -243,27 +254,27 @@ SELECT
 				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
-						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END)
-	   - 
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
-	   -- NHS Talking Therapies 6 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate]) <=42 
-					       THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
-	   -- NHS Talking Therapies 18 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
-	   -- NHS Talking Therapies 1st-2nd Treatment >90 days
-	   COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
-	   COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
+							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END)
+		- 
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
+		-- NHS Talking Therapies 6 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
+		-- NHS Talking Therapies 18 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End  AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
+		-- NHS Talking Therapies 1st-2nd Treatment >90 days
+		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
+		COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
 		-- NHS Talking Therapies Reliable Recovery
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B06 Numerator',
@@ -279,7 +290,10 @@ SELECT
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
 		-- NHS Talking Therapies Finishing a Course of Treatment 
 		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
-							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count',
+		-- NHS Talking Therapies Finishing a Course of Treatment YTD
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate]  AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID+Cast(r.ServDischDate as varchar) ELSE NULL END) AS 'CDP_B09 Count' 
 
   FROM [mesh_IAPT].[IDS101referral] r
 
@@ -290,22 +304,21 @@ INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.Uni
 LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
 LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
-WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+ Where h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start_YTD) AND @Period_End
   AND UsePathway_Flag = 'True'
   AND i.IsLatest = '1'
   ANd Effective_to IS NULL
 
 GROUP BY 
-h.[ReportingPeriodEndDate], 
 STP_Code, 
 STP_Name, 
-Region_Code, 
+Region_Code,
 Region_Name
 
 UNION
 --ADD SUBICB FIGURES
 SELECT
-	   h.ReportingPeriodEndDate AS [Reporting_Period],
+	    @Period_End AS Reporting_Period,
 	   'SubICB' AS Org_Type,
 	   COALESCE(cc.New_Code, r.OrgIDComm,'Missing / Invalid' COLLATE database_default) AS 'Org_Code',
 	   Organisation_Name AS Org_Name,
@@ -318,27 +331,27 @@ SELECT
 				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
 	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
-						   THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END)
-	   - 
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
-	   -- NHS Talking Therapies 6 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
-	   -- NHS Talking Therapies 18 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
-	   -- NHS Talking Therapies 1st-2nd Treatment >90 days
-	   COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
-	   COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
+							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END)
+		- 
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
+		-- NHS Talking Therapies 6 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
+		-- NHS Talking Therapies 18 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End  AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
+		-- NHS Talking Therapies 1st-2nd Treatment >90 days
+		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
+		COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
 		-- NHS Talking Therapies Reliable Recovery
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B06 Numerator',
@@ -354,7 +367,10 @@ SELECT
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
 		-- NHS Talking Therapies Finishing a Course of Treatment 
 		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
-							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count',
+		-- NHS Talking Therapies Finishing a Course of Treatment YTD
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate]  AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID+Cast(r.ServDischDate as varchar) ELSE NULL END) AS 'CDP_B09 Count' 
 
   FROM [mesh_IAPT].[IDS101referral] r
 
@@ -364,12 +380,11 @@ INNER JOIN [mesh_IAPT].[IsLatest_SubmissionID] i ON r.UniqueSubmissionID = i.Uni
 LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON r.OrgIDComm = cc.Org_Code 
 LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code, r.OrgIDComm) = ch.Organisation_Code 
 
-WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+ Where h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start_YTD) AND @Period_End
   AND UsePathway_Flag = 'True'
   AND i.IsLatest = '1'
 
 GROUP BY 
-h.[ReportingPeriodEndDate],
 COALESCE(cc.New_Code, r.OrgIDComm,'Missing / Invalid' COLLATE database_default),
 Organisation_Name, 
 STP_Code, 
@@ -381,7 +396,7 @@ UNION
 --ADD Provider Figures
 
 SELECT
-	   h.ReportingPeriodEndDate AS Reporting_Period,
+	    @Period_End AS Reporting_Period,
 	   'Provider' AS Org_Type,
 	   COALESCE(ps.Prov_Successor, r.OrgID_Provider, 'Missing / Invalid' COLLATE database_default) AS 'Org_Code',
 	   COALESCE(ph.Organisation_Name, pu.Site_Name) AS 'Org_Name',
@@ -393,27 +408,28 @@ SELECT
 	   --COUNT(DISTINCT CASE WHEN TherapySession_FirstDate BETWEEN @Period_Start AND @Period_End 
 				--		   THEN r.PathwayID ELSE NULL END) AS 'CDP_B04 Count',  --Removed  April 2024
 	   -- NHS Talking Therapies Recovery
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND Recovery_Flag = 'True' 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END)
-	   - 
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
-	   -- NHS Talking Therapies 6 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
-	   -- NHS Talking Therapies 18 Week Waits
-	   COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
-	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
-	   -- NHS Talking Therapies 1st-2nd Treatment >90 days
-	   COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate] AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
-						   THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
-	   COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
+	   COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' 
+							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B05 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END)
+		- 
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND NotCaseness_Flag = 'True' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B05 Denominator',
+		-- NHS Talking Therapies 6 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=42 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B02 Denominator',
+		-- NHS Talking Therapies 18 Week Waits
+		COUNT(DISTINCT CASE WHEN r.[ServDischDate] BETWEEN @Period_Start AND @Period_End  AND CompletedTreatment_Flag = 'True' AND DATEDIFF(dd,[ReferralRequestReceivedDate],[TherapySession_FirstDate])<=126 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Numerator',
+		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B01 Denominator',
+		-- NHS Talking Therapies 1st-2nd Treatment >90 days
+		COUNT(DISTINCT CASE WHEN R.[TherapySession_SecondDate] BETWEEN @Period_Start AND @Period_End AND DATEDIFF(DD,[TherapySession_FirstDate],[TherapySession_SecondDate]) >90 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Numerator',
+		COUNT(DISTINCT CASE WHEN TherapySession_SecondDate BETWEEN @Period_Start AND @Period_End 
+							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B03 Denominator',
 		-- NHS Talking Therapies Reliable Recovery
 		COUNT(DISTINCT CASE WHEN ServDischDate IS NOT NULL AND TreatmentCareContact_Count >= 2 AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND  Recovery_Flag = 'True' AND ReliableImprovement_Flag = 'True'
 							 THEN  r.PathwayID ELSE NULL END) AS 'CDP_B06 Numerator',
@@ -429,7 +445,10 @@ SELECT
 							 THEN r.PathwayID ELSE NULL END) AS 'CDP_B07 Denominator',
 		-- NHS Talking Therapies Finishing a Course of Treatment 
 		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN @Period_Start AND @Period_End AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
-							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count' 
+							THEN r.PathwayID ELSE NULL END) AS 'CDP_B08 Count',
+		-- NHS Talking Therapies Finishing a Course of Treatment YTD
+		COUNT(DISTINCT CASE WHEN r.ServDischDate IS NOT NULL AND r.ServDischDate BETWEEN h.[ReportingPeriodStartDate] AND h.[ReportingPeriodEndDate]  AND UsePathway_Flag ='True' AND CompletedTreatment_Flag = 'True'
+							THEN r.PathwayID+Cast(r.ServDischDate as varchar) ELSE NULL END) AS 'CDP_B09 Count' 
 
 
 FROM [mesh_IAPT].[IDS101referral] r
@@ -447,12 +466,11 @@ LEFT JOIN (SELECT DISTINCT Site_Code, STP_Code, STP_Name, Region_Code, Region_Na
 					  FROM [Reporting_UKHD_ODS].[Provider_Hierarchies] phh
 					  INNER JOIN [Reporting_UKHD_ODS].[Provider_Site] puu ON phh.Organisation_Code = puu.Trust_Code) puh ON COALESCE(ps.Prov_Successor, r.OrgID_Provider) = puh.Site_Code
 
-WHERE h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start) AND @Period_Start
+ Where h.[ReportingPeriodStartDate] BETWEEN DATEADD(MONTH, 0, @Period_Start_YTD) AND @Period_End
   AND UsePathway_Flag = 'True'
   AND i.IsLatest = '1'
 
 GROUP BY 
-h.[ReportingPeriodEndDate],
 Organisation_Name, 
 COALESCE(ps.Prov_Successor, r.OrgID_Provider, 'Missing / Invalid' COLLATE database_default),
 COALESCE(ph.Organisation_Name, pu.Site_Name),
@@ -484,11 +502,12 @@ SELECT Reporting_Period,
 	   CAST([CDP_B06 Denominator] AS FLOAT) AS [CDP_B06 Denominator],
 	   CAST([CDP_B07 Numerator] AS FLOAT) AS [CDP_B07 Numerator],
 	   CAST([CDP_B07 Denominator] AS FLOAT) AS [CDP_B07 Denominator],
-	   CAST([CDP_B08 Count] AS FLOAT) AS [CDP_B08 Count]
+	   CAST([CDP_B08 Count] AS FLOAT) AS [CDP_B08 Count],
+	   CAST([CDP_B09 Count] AS FLOAT) AS [CDP_B09 Count]
 
-  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
+INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]
 
-  FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
+from [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures]
 
 --unpivot to new structure
 SELECT Reporting_Period,
@@ -502,13 +521,14 @@ SELECT Reporting_Period,
 	   Region_Name,
 	   Measure_Value
 
-  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
+INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot]
 
 FROM  (SELECT * FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_cast_float]) p  
 
 UNPIVOT  
 ([Measure_Value] FOR [TEMP_CDP_Measure_ID_Type] IN --[CDP_B04 Count] Removed Arpril 2024
-		([CDP_B05 Numerator],[CDP_B05 Denominator],[CDP_B02 Numerator],[CDP_B02 Denominator],[CDP_B01 Numerator],[CDP_B01 Denominator],[CDP_B03 Numerator],[CDP_B03 Denominator],[CDP_B06 Numerator],[CDP_B06 Denominator],[CDP_B07 Numerator],[CDP_B07 Denominator],[CDP_B08 Count])   
+		([CDP_B05 Numerator],[CDP_B05 Denominator],[CDP_B02 Numerator],[CDP_B02 Denominator],[CDP_B01 Numerator],[CDP_B01 Denominator],[CDP_B03 Numerator],[CDP_B03 Denominator],[CDP_B06 Numerator],[CDP_B06 Denominator],
+		[CDP_B07 Numerator],[CDP_B07 Denominator],[CDP_B08 Count],[CDP_B09 Count]) --CDP_B09 Count  
 )AS unpvt;  
 
 -- Split out Measure ID and Measure Type into seperate columns
@@ -524,7 +544,7 @@ SELECT Reporting_Period,
 	   Region_Name,
 	   SUBSTRING([TEMP_CDP_Measure_ID_Type],9,LEN([TEMP_CDP_Measure_ID_Type])-8) AS Measure_Type,
 	   Measure_Value
-  INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
+ INTO [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unrounded]
 
   FROM [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_All_Measures_Unpivot] f
 
@@ -1036,4 +1056,3 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 --			  FROM [MHDInternal].[STAGING_CDP_B_NHS_Talking_Therapies_Monthly]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
 --DROP TABLE [MHDInternal].[TEMP_CDP_B_NHS_Talking_Therapies_Monthly_Future_Months]
-
