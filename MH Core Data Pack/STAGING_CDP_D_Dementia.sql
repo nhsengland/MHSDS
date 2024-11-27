@@ -20,47 +20,50 @@ BACKGROUND INFO: This metric is published by NHSD.
 				 The last example segways into why data is re-aggregated from Sub-ICB to ICB and Region in this code (rather than pulled directly from publication).
 				 In Apr-20 the following Sub-ICBs merged but in doing so changed their ICB look-up.
 				 Sub-ICBs 09L (ICB - QNX), 09N (ICB - QXU), 09Y (ICB - QXU) merged to create Sub-ICB 92A (ICB - QXU).
-				 As you can see 09L had a different ICB look-up previously (please note you will not be able to see this in the [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] table as it has sadly been overridden).
+				 As you can see 09L had a different ICB look-up previously (please note you will not be able to see this in the [Reporting_UKHD_ODS].[Commissioner_Hierarchies] table as it has sadly been overridden).
 				 Similarly, 
 				 Sub-ICBs 03D (ICB - QHM), 03E (ICB - QWO), 03M (ICB - QOQ) merged to create Sub-ICB 42D (ICB - QOQ).
-				 As you can see 03D and 03E have different ICBs look-ups previously (again, you will not be able to see this in the [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] table as it has sadly been overridden).
+				 As you can see 03D and 03E have different ICBs look-ups previously (again, you will not be able to see this in the [Reporting_UKHD_ODS].[Commissioner_Hierarchies] table as it has sadly been overridden).
 
 				 This method of re-aggreagtiong data from Sub-ICB to ICB and Region also resolves the issue where Basstelaw Sub-ICB 02Q moved from ICB QF7 to QT1 in Jul-22.
 				 Therefore when doing the re-allocations we apply the Bassetlaw look-up to 0 as we have already reallocated the actual data via this method rather than having to create an estimate.
 
-INPUT:			 [NHSE_UKHF].[Primary_Care_Dementia].[vw_Diag_Rate_By_NHS_Org_65Plus1]
-				 [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges]
-				 [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards]
-				 [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]
+INPUT:			 [UKHF_Primary_Care_Dementia].[Diag_Rate_By_NHS_Org_65Plus1]
+				 [Internal_Reference].[ComCodeChanges]
+				 [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+				 [MHDInternal].[Reference_CDP_Standards]
+				 [MHDInternal].[Reference_CDP_Plans]
 
 TEMP:			 SEE DROPPED TABLES AT THE END OF SCRIPT
 
-OUTPUT:			 [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
+OUTPUT:			 [MHDInternal].[STAGING_CDP_D_Dementia]
 
 WRITTEN BY:		 Kirsty Walker on 16/05/23
 
 UPDATES:		 [insert description of any updates, insert your name and date]
-
+Version -  CDP-Development/2B. STAGING TABLES/i) MONTHLY SCRIPTS/STAGING_CDP_D_Dementia.sql  JM 29/08/2024
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 ---------------------- Primary_Care_Dementia (New Collection) ---------------------------
+ 
 DECLARE @ENDRP DATETIME
 DECLARE @Month DATETIME
 DECLARE @MonthBack INT
 DECLARE @STARTRP DATETIME
 
-SET @ENDRP = (SELECT MAX(Effective_Snapshot_Date) FROM [NHSE_UKHF].[Primary_Care_Dementia].[vw_Diag_Rate_By_NHS_Org_65Plus1])
+SET @ENDRP = (SELECT MAX(Effective_Snapshot_Date) FROM [UKHF_Primary_Care_Dementia].[Diag_Rate_By_NHS_Org_65Plus1])
 SET @MonthBack = 11 --as 12 months of data is published each month and loaded into the table.
 
-SET @STARTRP = EOMONTH((SELECT DATEADD(mm,-@MonthBack,@ENDRP)))
---SET @STARTRP = 'Oct 31 2022 12:00AM' -- Data from Oct-22 is sourced from the new Primary Care Dementia data source
+--SET @STARTRP = EOMONTH((SELECT DATEADD(mm,-@MonthBack,@ENDRP)))
+SET @STARTRP = 'Oct 31 2022 12:00AM' -- Data from Oct-22 is sourced from the new Primary Care Dementia data source
 --CHANGE THIS BACK TO THE OLD STARTRP WHEN WE HAVE 12 MONTH'S OF DATA, SO FOR OCT-23 DATA IN NOV-23.
 -- THEN CAN CHANGE TO INSERT TO RATHER THAN DROP TABLES SO JUST ADD NEW MONTHS (IN STEP 4)
 
 -- Delete any rows which already exist in output table for this time period
-DELETE FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
+DELETE FROM [MHDInternal].[STAGING_CDP_D_Dementia]
  WHERE Reporting_Period BETWEEN @STARTRP AND @ENDRP
+
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 1A: WRANGLE THE RAW DATA INTO THE REQUIRED NUMERATOR AND DENOMINATOR TABLES
@@ -86,12 +89,12 @@ SELECT
 	   END as Measure_Type,
 	   SUM(d.Measure_Value) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
 
-  FROM [NHSE_UKHF].[Primary_Care_Dementia].[vw_Diag_Rate_By_NHS_Org_65Plus1] d
+  FROM [UKHF_Primary_Care_Dementia].[Diag_Rate_By_NHS_Org_65Plus1] d
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON d.Org_Code = cc.Org_Code COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,d.Org_Code) = ch.Organisation_Code COLLATE database_default
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON d.Org_Code = cc.Org_Code COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,d.Org_Code) = ch.Organisation_Code COLLATE database_default
 
  WHERE d.Effective_Snapshot_Date between @STARTRP and @ENDRP
    and d.Org_Type  in ('SUB_ICB_LOC', 'CCG') -- to filter for SubICB locations
@@ -125,9 +128,9 @@ SELECT
 	   d.Measure_Type,
 	   SUM(d.Measure_Value) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den] d
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den] d
   
  GROUP BY
 d.Reporting_Period,
@@ -157,9 +160,9 @@ SELECT
 	   d.Measure_Type,
 	   SUM(d.Measure_Value) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den] d
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den] d
   
  GROUP BY
 d.Reporting_Period,
@@ -189,12 +192,12 @@ SELECT
 	   END as Measure_Type,
 	   SUM(d.Measure_Value) as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
 
-  FROM [NHSE_UKHF].[Primary_Care_Dementia].[vw_Diag_Rate_By_NHS_Org_65Plus1] d
+  FROM [UKHF_Primary_Care_Dementia].[Diag_Rate_By_NHS_Org_65Plus1] d
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_Other_ComCodeChanges] cc ON d.Org_Code = cc.Org_Code COLLATE database_default
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,d.Org_Code) = ch.Organisation_Code COLLATE database_default
+LEFT JOIN [Internal_Reference].[ComCodeChanges] cc ON d.Org_Code = cc.Org_Code COLLATE database_default
+LEFT JOIN [Reporting_UKHD_ODS].[Commissioner_Hierarchies] ch ON COALESCE(cc.New_Code,d.Org_Code) = ch.Organisation_Code COLLATE database_default
 
  WHERE d.Effective_Snapshot_Date between @STARTRP and @ENDRP
    and d.Org_Type='COUNTRY_RESPONSIBILITY' -- to filter for England data
@@ -211,24 +214,24 @@ STEP 1B: UNION ALL NUMERATOR AND DENOMINATOR TABLES TOGETHER
 
 SELECT *
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Num_&_Den]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Num_&_Den]
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
-
-UNION
-
-SELECT *
-  FROM  [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
 
 UNION
 
 SELECT *
-  FROM  [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
+  FROM  [MHDInternal].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
 
 UNION
 
 SELECT *
-  FROM  [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
+  FROM  [MHDInternal].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
+
+UNION
+
+SELECT *
+  FROM  [MHDInternal].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 1C: WRANGLE THE RAW DATA INTO THE REQUIRED PERCENTAGE TABLES 
@@ -249,15 +252,15 @@ SELECT
 	   'Percentage' as Measure_Type,
 	   Num.Measure_Value/Den.Measure_Value as Measure_Value
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Measures]
 
   FROM (SELECT * 
-		  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Num_&_Den]
+		  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Num_&_Den]
 		 WHERE Measure_Type='Numerator') Num
 
 LEFT JOIN 
 	   (SELECT * 
-		  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Num_&_Den]
+		  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Num_&_Den]
 		 WHERE Measure_Type='Denominator') Den 
 			ON Num.Reporting_Period = Den.Reporting_Period
 		   AND Num.Org_Code = Den.Org_Code
@@ -265,7 +268,7 @@ LEFT JOIN
 UNION
 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Num_&_Den]
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Num_&_Den]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 2 REMAPPING - not required here
@@ -285,10 +288,10 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List]
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies] 
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Org_List]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies] 
  WHERE Effective_To IS NULL 
-   AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
+   AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP' AND Organisation_Name NOT LIKE '%SUB-ICB REPORTING ENTITY%'
 
 UNION
 
@@ -301,20 +304,20 @@ SELECT DISTINCT
 	   Region_Code,
 	   Region_Name
 
-  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]
+  FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
  WHERE Effective_To IS NULL 
    AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP'
 
 -- Get list of all orgs and indicator combinations
 SELECT * 
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List_Dates]
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Org_List_Dates]
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Org_List]
 CROSS JOIN (SELECT DISTINCT 
 				   Reporting_Period, 
 				   CDP_Measure_ID,
 				   CDP_Measure_Name,
 				   Measure_Type 
-			  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures] )_
+			  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Measures] )_
 
 -- Find list of only missing rows
 SELECT 
@@ -331,11 +334,11 @@ SELECT
 	   d.Measure_Type,
 	   CAST(NULL as float) as Measure_Value
 
- INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Missing_Orgs]
+ INTO [MHDInternal].[TEMP_CDP_D_Dementia_Missing_Orgs]
 
- FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List_Dates] d
+ FROM [MHDInternal].[TEMP_CDP_D_Dementia_Org_List_Dates] d
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures] e 
+LEFT JOIN [MHDInternal].[TEMP_CDP_D_Dementia_Measures] e 
    ON d.Reporting_Period = e.Reporting_Period
   AND d.CDP_Measure_ID = e.CDP_Measure_ID  
   AND d.Org_Type = e.Org_Type
@@ -344,9 +347,9 @@ LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures] e
 WHERE e.Org_Code IS NULL
 
 -- Add into data
-INSERT INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures] 
+INSERT INTO [MHDInternal].[TEMP_CDP_D_Dementia_Measures] 
 SELECT * 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Missing_Orgs]
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Missing_Orgs]
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 3 ADD TARGETS (STANDARD AND PLAN)
@@ -367,19 +370,21 @@ SELECT
        m.Measure_Type,
        m.Measure_Value,
 	   s.[Standard],
-	   p.[Plan],
-	   CAST(NULL as float) as Plan_Percentage_Achieved,
+	   case when m.Measure_Type='Percentage' then [Plan] else Null end as 'Plan',
+	   case when m.Measure_Type='Percentage' then ROUND(CAST(Measure_Value AS FLOAT)/NULLIF(CAST(P.[Plan] AS FLOAT),0),4) 
+	   else Null end as Plan_Percentage_Achieved,
+		Cast ((case when m.Measure_Type='Percentage' then ROUND(CAST(Measure_Value AS FLOAT)/NULLIF(CAST(P.[Plan] AS FLOAT),0),4)  else Null end)*100 as varchar)+'%' Plan_Percentage_Achieved_Str,
 	   s.Standard_STR,
 	   p.Plan_STR
 	   
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures_&_targets]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Measures_&_targets]  
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures] m
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Measures] m
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Standards] s on m.Reporting_Period = s.Reporting_Period
+LEFT JOIN [MHDInternal].[Reference_CDP_Standards] s on m.Reporting_Period = s.Reporting_Period
 and m.CDP_Measure_ID = s.CDP_Measure_ID
 
-LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] p on m.Reporting_Period = p.Reporting_Period
+LEFT JOIN [MHDInternal].[Reference_CDP_Plans] p on m.Reporting_Period = p.Reporting_Period
 and m.CDP_Measure_ID = p.CDP_Measure_ID
 and m.Org_Code = p.Org_Code
 
@@ -388,17 +393,16 @@ STEP 4 ADD IN STR VALUES, LAST MODIFIED DATE AND LATEST DATE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
-UPDATE [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
+UPDATE [MHDInternal].[STAGING_CDP_D_Dementia]
 SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) AS Reporting_Period
-  INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Is_Latest] 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures_&_targets]
+  INTO [MHDInternal].[TEMP_CDP_D_Dementia_Is_Latest] 
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Measures_&_targets]
 
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
-
+INSERT INTO [MHDInternal].[STAGING_CDP_D_Dementia]  
 SELECT  
 	   m.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -433,12 +437,12 @@ SELECT
 	   CAST(NULL as varchar) as LTP_Trajectory_STR,
 	   CAST(NULL as varchar) as LTP_Trajectory_Percentage_Achieved_STR,
 	   m.Plan_STR,
-	   CAST(NULL as varchar) as Plan_Percentage_Achieved_STR,
+	   cast(m.Plan_Percentage_Achieved*100 as varchar)+'%',
 	   GETDATE() as Last_Modified
 
-  FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures_&_targets] m
+  FROM [MHDInternal].[TEMP_CDP_D_Dementia_Measures_&_targets] m
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Is_Latest]  i ON m.Reporting_Period = i.Reporting_Period
+LEFT JOIN [MHDInternal].[TEMP_CDP_D_Dementia_Is_Latest]  i ON m.Reporting_Period = i.Reporting_Period
 
 -- Check for differences between new month and previous month data (nb this will look high for the YTD measures when April data comes in)
 -- The parameters may need to change 
@@ -490,12 +494,12 @@ SELECT
 			ROUND(NULLIF(ABS(latest.Measure_Value - previous.Measure_Value),0)/NULLIF(latest.Measure_Value,0),1)
 	   END as Percentage_Change
 
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia] latest
+  FROM [MHDInternal].[STAGING_CDP_D_Dementia] latest
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_METADATA] meta 
+  LEFT JOIN [MHDInternal].[REFERENCE_CDP_METADATA] meta 
 	   ON latest.CDP_Measure_ID = meta.CDP_Measure_ID 
 
-  LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia] previous
+  LEFT JOIN [MHDInternal].[STAGING_CDP_D_Dementia] previous
 	  ON latest.CDP_Measure_ID = previous.CDP_Measure_ID 
 		  AND CASE WHEN meta.Update_Frequency = 'Monthly' THEN EOMONTH(DATEADD(mm, -1, latest.Reporting_Period ))
 		  WHEN meta.Update_Frequency = 'Quarterly' THEN EOMONTH(DATEADD(mm, -3, latest.Reporting_Period )) 
@@ -512,7 +516,7 @@ Percentage_Change DESC
 
 --check table has updated okay
 SELECT MAX(Reporting_Period)
-  FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
+  FROM [MHDInternal].[STAGING_CDP_D_Dementia]
   WHERE Measure_Value IS NOT NULL
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -520,29 +524,29 @@ STEP 5 DROP ALL TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 --STEP 1A: WRANGLE THE RAW DATA INTO THE REQUIRED NUMERATOR AND DENOMINATOR TABLES
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_SubICB_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_ICB_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Region_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_ENG_Num_&_Den]
 
 --STEP 1B: UNION ALL NUMERATOR AND DENOMINATOR TABLES TOGETHER
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Num_&_Den]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Num_&_Den]
 
 --STEP 1C: WRANGLE THE RAW DATA INTO THE REQUIRED PERCENTAGE TABLES 
 --AND UNION PERCENTAGE, NUMERATOR AND DENOMINATOR DATA TOGETHER INTO MEASURES TABLE
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Measures]
 
 --LOOP IN MISSING ICBs and SubICBs
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Org_List_Dates]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Missing_Orgs]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Org_List]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Org_List_Dates]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Missing_Orgs]
 
 --STEP 3 ADD TARGETS (STANDARD AND PLAN)
 --ROUNDING AND SUPRESSION not required here
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Measures_&_targets]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Measures_&_targets]
 
 --STEP 4 ADD IN STR VALUES, LAST MODIFIED DATE AND LATEST DATE
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Is_Latest]
+DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Is_Latest]
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -569,7 +573,7 @@ ADDITIONAL STEP - KEEP COMMENTED OUT UNTIL NEEDED
 --[Org_Name],
 --[Measure_Type]
 
---INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Future_Months]
+--INTO [MHDInternal].[TEMP_CDP_D_Dementia_Future_Months]
 
 --FROM ( 
 --SELECT [Reporting_Period],
@@ -592,11 +596,11 @@ ADDITIONAL STEP - KEEP COMMENTED OUT UNTIL NEEDED
 --[Org_Code],
 --[Org_Name],
 --[Measure_Type]
---FROM  [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans] 
+--FROM  [MHDInternal].[Reference_CDP_Plans] 
 --WHERE CDP_Measure_ID IN('CDP_D01') -- ADD MEASURE IDS
 --AND [Reporting_Period] BETWEEN @RPStartTargets AND @RPEndTargets )_
 
---INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]
+--INSERT INTO [MHDInternal].[STAGING_CDP_D_Dementia]
 --SELECT
 --f.Reporting_Period,
 --	   0 as Is_Latest,
@@ -624,11 +628,12 @@ ADDITIONAL STEP - KEEP COMMENTED OUT UNTIL NEEDED
 --	   NULL as Plan_Percentage_Achieved_STR,
 --	   GETDATE() as Last_Modified
 
---	FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Future_Months] f
---	LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
+--	FROM [MHDInternal].[TEMP_CDP_D_Dementia_Future_Months] f
+--	LEFT JOIN [MHDInternal].[Reference_CDP_Plans]  p  ON f.[Reporting_Period] = p.[Reporting_Period] AND f.Org_Code = p.Org_Code AND f.[CDP_Measure_ID] = p.[CDP_Measure_ID] AND f.Org_Type = p.Org_Type
 --	LEFT JOIN [NHSE_Sandbox_Policy].[dbo].[REFERENCE_CDP_LTP_Trajectories]  l  ON f.[Reporting_Period] = l.[Reporting_Period] AND f.Org_Code = l.Org_Code AND f.[CDP_Measure_ID] = l.[CDP_Measure_ID] AND f.Org_Type = l.Org_Type
 --	INNER JOIN 
 --	(SELECT DISTINCT Org_Code, Org_Name, ICB_Code, ICB_Name, Region_Code, Region_Name 
---	FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_CDP_D_Dementia]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
+--	FROM [MHDInternal].[STAGING_CDP_D_Dementia]) s ON f.Org_Code = s.Org_Code-- Used the output table to lookup mapping
 
---	DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_D_Dementia_Future_Months]
+--	DROP TABLE [MHDInternal].[TEMP_CDP_D_Dementia_Future_Months]
+
