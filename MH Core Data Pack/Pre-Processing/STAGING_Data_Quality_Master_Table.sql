@@ -2,12 +2,13 @@
 DQ DASHBOARD
 ASSET: PRE-PROCESSED TABLES
 CREATED BY CARL MONEY 27/01/2021
+Updatedf to UDAL Version April 2024
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 DECLARE @EndRP INT
 
 SET @EndRP = (SELECT max(UniqMonthID)
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header)
+FROM MHDInternal.PreProc_Header)
 
 PRINT @EndRP
 
@@ -20,7 +21,7 @@ PRINT @StartRP
 DECLARE @ReportingPeriodEnd DATE
 
 SET @ReportingPeriodEnd = (SELECT ReportingPeriodEndDate
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
+FROM MHDInternal.PreProc_Header
 WHERE UniqMonthID = @EndRP)
 
 PRINT @ReportingPeriodEnd
@@ -28,7 +29,7 @@ PRINT @ReportingPeriodEnd
 DECLARE @ReportingPeriodStart DATE
 
 SET @ReportingPeriodStart = (SELECT ReportingPeriodEndDate
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header
+FROM MHDInternal.PreProc_Header
 WHERE UniqMonthID = @StartRP)
 
 PRINT @ReportingPeriodStart
@@ -41,8 +42,9 @@ GET DISTINCT LIST OF PROVIDERS
 
 -- Use Max month to pull latest data from MPL
 
+
 DECLARE @MAXMPLMONTH DATE
-SET @MAXMPLMONTH = (SELECT MAX([Reporting_Period]) from [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker])
+SET @MAXMPLMONTH = (SELECT MAX([Reporting_Period]) from MHDInternal.[REFERENCE_MHSDS_Submission_Tracker])
 
 
 SELECT distinct
@@ -55,14 +57,17 @@ SELECT distinct
 	CASE WHEN current_status IN ('No longer expected to submit','Not currently expected to submit') THEN 'Not in scope'
 	ELSE 'In scope' END AS 'Status'
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_MHSDSOrgs]
+INTO MHDInternal.[TEMP_CDP_Data_Quality_Master_MHSDSOrgs]
 
-FROM [NHSE_Sandbox_Policy].[dbo].[REFERENCE_MHSDS_Submission_Tracker] m
+FROM MHDInternal.[REFERENCE_MHSDS_Submission_Tracker] m
 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p1 ON m.ICB_Code = p1.STP_Code -- GET NAMES FROM REFERENCE TABLE 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p2 ON m.Region_Code = p2.Region_Code -- GET NAMES FROM REFERENCE TABLE 
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p1 ON m.ICB_Code = p1.STP_Code -- GET NAMES FROM REFERENCE TABLE 
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p2 ON m.Region_Code = p2.Region_Code -- GET NAMES FROM REFERENCE TABLE 
 
 WHERE [Reporting_Period] = @MAXMPLMONTH
+
+
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 CREATE PADDED TABLE FOR EACH ORG AND MONTH
@@ -81,13 +86,13 @@ SELECT
 	o.OrgIDProvider,
 	o.Status
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Base]
+INTO MHDInternal.[TEMP_CDP_Data_Quality_Master_Base]
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] o
+FROM MHDInternal.[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] o
 
 CROSS JOIN
 
-(SELECT h.ReportingPeriodEndDate, h.UniqMonthID FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h WHERE UniqMonthID BETWEEN @StartRP AND @EndRP) d
+(SELECT h.ReportingPeriodEndDate, h.UniqMonthID FROM MHDInternal.PreProc_Header h WHERE UniqMonthID BETWEEN @StartRP AND @EndRP) d
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET ORGANISATION STATUS FOR LATEST PERIOD AND 
@@ -107,9 +112,9 @@ SELECT
 		ELSE 'Successful submission' -- misleading as some months may not have a submission? basically just saying that they are in scope and have submitted at least once before 
 	END AS Der_OrgSubmissionStatus
 
-INTO [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_OrgStat]
+INTO MHDInternal.[TEMP_CDP_Data_Quality_Master_OrgStat]
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Base] b
+FROM MHDInternal.[TEMP_CDP_Data_Quality_Master_Base] b
 
 LEFT JOIN
 (SELECT
@@ -117,20 +122,21 @@ LEFT JOIN
 	MAX(CASE WHEN r.UniqMonthID = @EndRP-1 THEN SubmissionType END) AS SubmissionType,
 	MIN(r.UniqMonthID) AS FirstSub
 
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r
+FROM MHDInternal.PreProc_RecordCounts r
 
 WHERE TableName = 'MHS000Header' AND r.SubmissionType <= 2 AND r.RecordCount IS NOT NULL
 
 GROUP BY r.OrgIDProvider) f ON b.OrgIDProvider = f.OrgIDProvider
 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies p ON b.OrgIDProvider = p.Organisation_Code COLLATE DATABASE_DEFAULT 
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies p ON b.OrgIDProvider = p.Organisation_Code COLLATE DATABASE_DEFAULT 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET NUMBER OF SUBMITTERS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
-DELETE FROM  [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+DELETE FROM  MHDInternal.[STAGING_Data_Quality_Master_Table]
+
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -163,10 +169,9 @@ SELECT
 	NULL AS Name_Source
 
 
+FROM MHDInternal.[TEMP_CDP_Data_Quality_Master_OrgStat] o
 
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_OrgStat] o
-
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts r ON r.UniqMonthID = o.UniqMonthID AND r.OrgIDProvider = o.[Provider code] AND r.TableName = 'MHS000Header'
+LEFT JOIN MHDInternal.PreProc_RecordCounts r ON r.UniqMonthID = o.UniqMonthID AND r.OrgIDProvider = o.[Provider code] AND r.TableName = 'MHS000Header'
 
 GROUP BY o.ReportingPeriodEndDate, o.[Provider code], Der_CurrentSubmissionWindow, Der_OrgSubmissionStatus, CASE 
 		WHEN (r.UniqMonthID < 1483 AND r.SubmissionType = 1) THEN 'Primary'
@@ -182,19 +187,19 @@ GET SUBMISSIONS OVER LAST FIVE MONTHS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 select o.UniqMonthID, o.OrgIDProvider, SubmissionType
 
-into [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Submission_History]
+into MHDInternal.[TEMP_CDP_Data_Quality_Master_Submission_History]
 
 FROM (
 select b.UniqMonthID, a.OrgIDProvider
 
-from (select distinct OrgIDProvider from NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts) a
+from (select distinct OrgIDProvider from MHDInternal.PreProc_RecordCounts) a
 
-cross join (select distinct uniqmonthid from NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts) b ) o
+cross join (select distinct uniqmonthid from MHDInternal.PreProc_RecordCounts) b ) o
 
-LEFT JOIN (SELECT * FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_RecordCounts WHERE ((UniqMonthID < 1483 AND SubmissionType = 2) OR (UniqMonthID >= 1483 AND SubmissionType = 1))
+LEFT JOIN (SELECT * FROM MHDInternal.PreProc_RecordCounts WHERE ((UniqMonthID < 1483 AND SubmissionType = 2) OR (UniqMonthID >= 1483 AND SubmissionType = 1))
 AND TableName = 'MHS000Header') r ON o.OrgIDProvider = r.OrgIDProvider AND o.UniqMonthID = r.UniqMonthID 
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT
 	o.ReportingPeriodEndDate,
@@ -219,9 +224,9 @@ SELECT
 	5 AS TargetValue,
 	NULL AS Name_Source
 	
-FROM [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_OrgStat] o
+FROM MHDInternal.[TEMP_CDP_Data_Quality_Master_OrgStat] o
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Submission_History] r ON o.[Provider code] = r.OrgIDProvider AND o.UniqMonthID = r.UniqMonthID
+LEFT JOIN MHDInternal.[TEMP_CDP_Data_Quality_Master_Submission_History] r ON o.[Provider code] = r.OrgIDProvider AND o.UniqMonthID = r.UniqMonthID
 
 WHERE o.Der_OrgSubmissionStatus = 'Successful submission' AND o.UniqMonthID BETWEEN @StartRP AND @EndRP
 
@@ -229,7 +234,7 @@ WHERE o.Der_OrgSubmissionStatus = 'Successful submission' AND o.UniqMonthID BETW
 GET DQMI MHSDS DATA SET SCORE
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT DISTINCT
 	d.Effective_Snapshot_Date AS ReportingPeriodEndDate,
@@ -254,7 +259,7 @@ SELECT DISTINCT
 	70 AS TargetValue,
 	NULL AS Name_Source
 
-FROM [NHSE_UKHF].[Data_Quality_Maturity_Index].[vw_Open_Data1] d 
+FROM [UKHF_Data_Quality_Maturity_Index].[Open_Data1] d 
 
 WHERE d.Dataset = 'MHSDS' AND d.Report_Period_Length = 'Monthly' AND d.Effective_Snapshot_Date >= '2019-04-30'
 
@@ -298,9 +303,9 @@ GET DQMI DATA ITEM SCORES
 GET CQUIN DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
-SELECT
+SELECT 
 	c.ReportingPeriodEndDate,
 	NULL AS UniqMonthID,
 	'Provider' AS Org_Type,
@@ -323,18 +328,19 @@ SELECT
 	40 AS TargetValue,
 	NULL AS Name_Source
 
-FROM [NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2324] c
+FROM [MHDInternal].[Dashboard_CQUIN2324] c
 --[NHSE_Sandbox_MentalHealth].[dbo].[Dashboard_CQUIN2223] c 
 
 WHERE c.Dashboard = 'Percentages' AND [Service Type] NOT IN ('CYP','Perinatal') AND MeasureGroup = 'All OMs'
 
 GROUP BY c.ReportingPeriodEndDate, c.[Organisation Code], c.[Service Type]
 
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET SNOMED COMPLIANCE - CARE CONTACTS
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT
 	a.ReportingPeriodEndDate,
@@ -359,9 +365,9 @@ SELECT
 	70 AS TargetName,
 	NULL AS Name_Source
 
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a 
+FROM MHDInternal.PreProc_Activity a 
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
+LEFT JOIN MHDInternal.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
 
 WHERE a.UniqMonthID >= @StartRP AND a.AttendOrDNACode IN ('5','6')
 
@@ -371,7 +377,7 @@ GROUP BY a.ReportingPeriodEndDate, a.OrgIDProv
 GET SNOMED COMPLIANCE - INDIRECT ACTIVITY
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT
 	a.ReportingPeriodEndDate,
@@ -396,9 +402,9 @@ SELECT
 	70 AS TargetValue,
 	NULL AS Name_Source
 
-FROM  NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a  
+FROM  MHDInternal.PreProc_Activity a  
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
+LEFT JOIN MHDInternal.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
 
 WHERE a.Der_ActivityType = 'Indirect' AND a.UniqMonthID >= @StartRP
 
@@ -419,10 +425,10 @@ a.[Region name] = COALESCE(p.[RegionName], ph.Region_Name),
 a.Name_Source = CASE WHEN p.OrgIDProvider is NOT NULL THEN 'MPL' 
 WHEN ph.[organisation_code] IS NOT NULL THEN 'ODS' ELSE NULL END
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]  a
+FROM MHDInternal.[STAGING_Data_Quality_Master_Table]  a
 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] p ON a.[Provider code] = p.[OrgIDProvider]
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies ph ON a.[Provider Code] = ph.[organisation_code] 
+LEFT JOIN MHDInternal.[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] p ON a.[Provider code] = p.[OrgIDProvider]
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies ph ON a.[Provider Code] = ph.[organisation_code] 
 
 WHERE Dashboard NOT IN ('SNoMED CT','Outcomes CQUIN') AND Org_Type = 'Provider'
 
@@ -430,9 +436,9 @@ UPDATE a
 
 SET a.UniqMonthID = h.UniqMonthID
 
-FROM  [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table] a
+FROM  MHDInternal.[STAGING_Data_Quality_Master_Table] a
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Header h ON a.ReportingPeriodEndDate = h.ReportingPeriodEndDate
+LEFT JOIN MHDInternal.PreProc_Header h ON a.ReportingPeriodEndDate = h.ReportingPeriodEndDate
 
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -450,10 +456,10 @@ a.[stp name] = COALESCE(ph.stp_name,p.[stpname]),
 a.Name_Source = CASE WHEN ph.Organisation_Name IS NOT NULL THEN 'ODS' 
 WHEN p.OrgIDProvider IS NOT NULL THEN 'MPL' else [name_Source] END
 
-FROM [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table] a
+FROM MHDInternal.[STAGING_Data_Quality_Master_Table] a
 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Provider_Hierarchies ph ON a.[Provider Code] = ph.[organisation_code] 
-LEFT JOIN [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] p ON a.[Provider code] = p.[OrgIDProvider]
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies ph ON a.[Provider Code] = ph.[organisation_code] 
+LEFT JOIN MHDInternal.[TEMP_CDP_Data_Quality_Master_MHSDSOrgs] p ON a.[Provider code] = p.[OrgIDProvider]
 
 WHERE Dashboard IN ('SNoMED CT','Outcomes CQUIN') AND Org_Type = 'Provider'
 
@@ -465,8 +471,8 @@ CQUIN OUTCOMES FOR ICB LEVEL - GP Postcode methodology
 AGGREGATE AT ICB LEVEL 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB') IS NOT NULL
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB
+IF OBJECT_ID ('MHDInternal.Temp_CQUIN23RefAgg_ICB') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CQUIN23RefAgg_ICB
 
 SELECT
 	m.ReportingPeriodEndDate,
@@ -481,11 +487,11 @@ SELECT
 	COUNT(DISTINCT CASE WHEN m.Der_RefCategory = 'Open' AND m.Der_InYearContacts >1 THEN m.UniqServReqID END) AS [Open referrals open more than six months with two or more contacts],
 	COUNT(DISTINCT CASE WHEN m.Der_RefCategory = 'Open' AND m.Der_InYearContacts >1 AND m.Der_LastAssessmentDate IS NOT NULL THEN m.UniqServReqID END) AS [Open referrals open more than six months with two or more contacts and a paired score]
 
-INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB
+INTO MHDInternal.Temp_CQUIN23RefAgg_ICB
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23Master m
+FROM MHDInternal.Temp_CQUIN23Master m
 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o ON m.Der_OrgIDCCG COLLATE DATABASE_DEFAULT = o.Organisation_Code  COLLATE DATABASE_DEFAULT
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o ON m.OrgIDCCGRes COLLATE DATABASE_DEFAULT = o.Organisation_Code  COLLATE DATABASE_DEFAULT
 
 WHERE m.Der_ServiceType = 'Community' 
 
@@ -495,7 +501,7 @@ GROUP BY m.ReportingPeriodEndDate, m.UniqMonthID, o.STP_Code, o.STP_Name, m.Der_
 Repeat for ICB-level combined CYP & PMH 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB
+INSERT INTO MHDInternal.Temp_CQUIN23RefAgg_ICB
 
 SELECT
 	m.ReportingPeriodEndDate,
@@ -510,9 +516,9 @@ SELECT
 	COUNT(DISTINCT CASE WHEN m.Der_RefCategory = 'Open' AND m.Der_InYearContacts >1 THEN m.UniqServReqID END) AS [Open referrals open more than six months with two or more contacts],
 	COUNT(DISTINCT CASE WHEN m.Der_RefCategory = 'Open' AND m.Der_InYearContacts >1 AND m.Der_LastAssessmentDate IS NOT NULL THEN m.UniqServReqID END) AS [Open referrals open more than six months with two or more contacts and a paired score]
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23Master m
+FROM MHDInternal.Temp_CQUIN23Master m
 
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies o ON m.Der_OrgIDCCG COLLATE DATABASE_DEFAULT = o.Organisation_Code  COLLATE DATABASE_DEFAULT
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o ON m.OrgIDCCGRes COLLATE DATABASE_DEFAULT = o.Organisation_Code  COLLATE DATABASE_DEFAULT
 
 WHERE m.Der_ServiceType IN ('CYP','Perinatal') 
 
@@ -525,8 +531,8 @@ GET ROLLING THREE MONTH FIGURE FOR CLOSED REFERRAL
 MEASURES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefFinal_ICB') IS NOT NULL
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefFinal_ICB
+IF OBJECT_ID ('MHDInternal.Temp_CQUIN23RefFinal_ICB') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CQUIN23RefFinal_ICB
 
 SELECT
 	r.ReportingPeriodEndDate,
@@ -538,9 +544,9 @@ SELECT
 	SUM(r.[Closed referrals open more than 14 days with two or more contacts]) OVER (PARTITION BY r.[Organisation Code], r.[Service Type]  ORDER BY r.UniqMonthID ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS [Closed referrals open more than 14 days with two or more contacts (three month rolling)],
 	SUM(r.[Closed referrals open more than 14 days with two or more contacts and a paired score]) OVER (PARTITION BY r.[Organisation Code], r.[Service Type]  ORDER BY r.UniqMonthID ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS [Closed referrals open more than 14 days with two or more contacts and a paired score (three month rolling)] 
 
-INTO NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefFinal_ICB
+INTO MHDInternal.Temp_CQUIN23RefFinal_ICB
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB r
+FROM MHDInternal.Temp_CQUIN23RefAgg_ICB r
 
 
 
@@ -548,8 +554,8 @@ FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB r
 UNPIVOT AND PUT INTO STAGING TABLE 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-IF OBJECT_ID ('NHSE_Sandbox_MentalHealth.dbo.Staging_CQUIN23_ICB') IS NOT NULL
-DROP TABLE NHSE_Sandbox_MentalHealth.dbo.Staging_CQUIN23_ICB
+IF OBJECT_ID ('MHDInternal.Staging_CQUIN23_ICB') IS NOT NULL
+DROP TABLE MHDInternal.Staging_CQUIN23_ICB
 
 SELECT  
 	ReportingPeriodEndDate,
@@ -562,11 +568,11 @@ SELECT
 	[Closed referrals open more than 14 days with two or more contacts and a paired score (three month rolling)] AS MeasureValue,
 	[Closed referrals open more than 14 days with two or more contacts (three month rolling)] AS Denominator
 
-INTO NHSE_Sandbox_MentalHealth.dbo.Staging_CQUIN23_ICB
+INTO MHDInternal.Staging_CQUIN23_ICB
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefFinal_ICB
+FROM MHDInternal.Temp_CQUIN23RefFinal_ICB
 
-INSERT INTO NHSE_Sandbox_MentalHealth.dbo.Staging_CQUIN23_ICB
+INSERT INTO MHDInternal.Staging_CQUIN23_ICB
 
 SELECT
 	ReportingPeriodEndDate,
@@ -579,13 +585,13 @@ SELECT
 	[Open referrals open more than six months with two or more contacts and a paired score] AS MeasureValue,
 	[Open referrals open more than six months with two or more contacts] AS Denominator
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Temp_CQUIN23RefAgg_ICB
+FROM MHDInternal.Temp_CQUIN23RefAgg_ICB
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 OUTPUT FOR DQ REPORTING 
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT 
 	c.ReportingPeriodEndDate,
@@ -610,10 +616,10 @@ SELECT
 	40 AS TargetValue
 	,'GP Postcode' AS Name_Source
 
-FROM NHSE_Sandbox_MentalHealth.dbo.Staging_CQUIN23_ICB c
+FROM MHDInternal.Staging_CQUIN23_ICB c
 
 LEFT JOIN (SELECT DISTINCT STP_Code, Region_Code, Region_Name 
-					  FROM [NHSE_Reference].[dbo].[tbl_Ref_ODS_Commissioner_Hierarchies]) r 
+					  FROM Reporting_UKHD_ODS.Commissioner_Hierarchies) r 
 					    ON [Organisation Code] = r.STP_Code
 
 GROUP BY c.ReportingPeriodEndDate, c.[Organisation Code], c.[Organisation Name], c.[Service Type], Region_Code, Region_Name 
@@ -622,7 +628,7 @@ GROUP BY c.ReportingPeriodEndDate, c.[Organisation Code], c.[Organisation Name],
 GET SNOMED COMPLIANCE - CARE CONTACTS GP POSTCODE ICB DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT 
 	a.ReportingPeriodEndDate
@@ -644,35 +650,28 @@ SELECT
 	,'Total contacts' AS DenominatorName
 	,COUNT(DISTINCT a.UniqCareContID) AS DenominatorValue
 	,'SNoMED CT' AS TargetName
-	,70 AS TargetName
+	,70 AS TargetValue
 	,'GP Postcode' AS Name_Source
+
+FROM MHDInternal.PreProc_Activity a 
+
+LEFT JOIN MHDInternal.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
+
+INNER JOIN MHDInternal.PreProc_Referral r ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID 
 	
-FROM NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a 
-
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.UniqCareContID = i.UniqCareContID AND a.RecordNumber = i.RecordNumber
-
-LEFT JOIN
-	(
-	SELECT g.RecordNumber, g.GMPCodeReg 
-	FROM NHSE_MHSDS.dbo.MHS002GP g
-	INNER JOIN NHSE_MHSDS.[dbo].[MHSDS_SubmissionFlags] s ON g.NHSEUniqSubmissionID = s.NHSEUniqSubmissionID AND s.Der_IsLatest = 'Y'
-	WHERE g.EndDateGMPRegistration IS NULL -- Chooses GP a patient is registered to at the end of the month
-	) g ON a.RecordNumber = g.RecordNumber
-
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_GP_Hierarchies] gh ON g.GMPCodeReg = gh.GP_Code COLLATE DATABASE_DEFAULT
-
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c ON gh.PCN_CCG_Code = c.Organisation_Code COLLATE DATABASE_DEFAULT
+LEFT JOIN  [Reporting_UKHD_ODS].[Commissioner_Hierarchies] c ON r.Der_SubICBCode = c.Organisation_Code COLLATE DATABASE_DEFAULT
 
 WHERE a.UniqMonthID >= @StartRP AND a.AttendOrDNACode IN ('5','6')
 
 GROUP BY a.ReportingPeriodEndDate ,COALESCE(c.STP_Code,'Missing / Invalid') ,COALESCE(c.Region_Code, 'Missing / Invalid'), COALESCE(c.STP_Name,'Missing / Invalid'),COALESCE(c.Region_Name, 'Missing / Invalid')
 
 
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 GET SNOMED COMPLIANCE - INDIRECT ACTIVITY GP POSTCODE ICB DATA
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-INSERT INTO [NHSE_Sandbox_Policy].[dbo].[STAGING_Data_Quality_Master_Table]
+INSERT INTO MHDInternal.[STAGING_Data_Quality_Master_Table]
 
 SELECT
 	a.ReportingPeriodEndDate
@@ -697,21 +696,13 @@ SELECT
 	,70 AS TargetValue
 	,'GP Postcode' AS Name_Source
 
-FROM  NHSE_Sandbox_MentalHealth.dbo.PreProc_Activity a  
+FROM  MHDInternal.PreProc_Activity a  
 
-LEFT JOIN NHSE_Sandbox_MentalHealth.dbo.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
+LEFT JOIN MHDInternal.PreProc_Interventions i ON a.Der_ActivityUniqID = i.Der_InterventionUniqID AND a.RecordNumber = i.RecordNumber AND i.Der_InterventionType = 'Indirect'
 
-LEFT JOIN
-	(
-	SELECT g.RecordNumber, g.GMPCodeReg 
-	FROM NHSE_MHSDS.dbo.MHS002GP g
-	INNER JOIN NHSE_MHSDS.[dbo].[MHSDS_SubmissionFlags] s ON g.NHSEUniqSubmissionID = s.NHSEUniqSubmissionID AND s.Der_IsLatest = 'Y'
-	WHERE g.EndDateGMPRegistration IS NULL -- Chooses GP a patient is registered to at the end of the month
-	) g ON a.RecordNumber = g.RecordNumber
+INNER JOIN MHDInternal.PreProc_Referral r ON a.RecordNumber = r.RecordNumber AND a.UniqServReqID = r.UniqServReqID 
 
-LEFT JOIN [NHSE_Reference].[dbo].[tbl_Ref_ODS_GP_Hierarchies] gh ON g.GMPCodeReg = gh.GP_Code COLLATE DATABASE_DEFAULT
-
-LEFT JOIN NHSE_Reference.dbo.tbl_Ref_ODS_Commissioner_Hierarchies c ON gh.PCN_CCG_Code = c.Organisation_Code COLLATE DATABASE_DEFAULT
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies c ON r.Der_SubICBCode = c.Organisation_Code COLLATE DATABASE_DEFAULT
 
 WHERE a.Der_ActivityType = 'Indirect' AND a.UniqMonthID >= @StartRP
 
@@ -722,7 +713,7 @@ GROUP BY a.ReportingPeriodEndDate, COALESCE(c.STP_Code,'Missing / Invalid'), COA
 DROP TEMPORARY TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_MHSDSOrgs]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Base]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_OrgStat]
-DROP TABLE [NHSE_Sandbox_Policy].[temp].[TEMP_CDP_Data_Quality_Master_Submission_History]
+DROP TABLE MHDInternal.[TEMP_CDP_Data_Quality_Master_MHSDSOrgs]
+DROP TABLE MHDInternal.[TEMP_CDP_Data_Quality_Master_Base]
+DROP TABLE MHDInternal.[TEMP_CDP_Data_Quality_Master_OrgStat]
+DROP TABLE MHDInternal.[TEMP_CDP_Data_Quality_Master_Submission_History]
