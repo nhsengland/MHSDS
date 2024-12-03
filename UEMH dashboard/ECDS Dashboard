@@ -3,7 +3,6 @@ UECMH DASHBOARD
 
 ECDS ANALYSIS 
 
-CREATED BY TOM BARDSLEY 30 JANUARY 2024
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 DECLARE @EndRP INT 
@@ -75,28 +74,31 @@ SELECT
 	,CASE 
 			WHEN EC_Chief_Complaint_SNOMED_CT IN ('248062006' --- self harm
 				,'272022009' --- depressive feelings 
+				,'366979004' -- depressed mood (new term)
+				,'6471006' -- feeling suicidal
 				,'48694002' --- feeling anxious 
 				,'248020004' --- behaviour: unsual 
-				,'6471006' -- feeling suicidal
-				,'7011001') THEN 1  --- hallucinations/delusions 
+				,'7011001' -- hallucinations 
+				,'2073000') THEN 1  --- delusions 
 			WHEN EC_Injury_Intent_SNOMED_CT = '276853009' THEN 1 --- self inflicted injury 
 			WHEN COALESCE(LEFT(Der_EC_Diagnosis_All, NULLIF(CHARINDEX(',',Der_EC_Diagnosis_All),0)-1),Der_EC_Diagnosis_All) 
 				IN ('52448006' --- dementia
 				,'2776000' --- delirium 
 				,'33449004' --- personality disorder
 				,'72366004' --- eating disorder
+				,'191736004' -- obsessive compulsive disorder 
+				,'371631005' -- panic disorer
 				,'197480006' --- anxiety disorder
 				,'35489007' --- depressive disorder
 				,'13746004' --- bipolar affective disorder
 				,'58214004' --- schizophrenia
 				,'69322001' --- psychotic disorder
+				,'44376007' --- dissociative disorder
 				,'397923000' --- somatisation disorder
 				,'30077003' --- somatoform pain disorder
-				,'44376007' --- dissociative disorder
 				,'17226007' ---- adjustment disorder
 				,'50705009'---- factitious disorder
-				,'191736004' -- obsessive compulsive disorder 
-				,'371631005' -- panic disorer
+				,'225624000' --- panic attack (deprecated)
 				) THEN 1 
 		ELSE 0 
 		END as MH_Flag 
