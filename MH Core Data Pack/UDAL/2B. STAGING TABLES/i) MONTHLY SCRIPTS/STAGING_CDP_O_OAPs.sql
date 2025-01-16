@@ -31,6 +31,8 @@ WRITTEN BY:		 Jade Sykes 25/5/23
 
 UPDATES:		 [insert description of any updates, insert your name and date]
 
+				MW 16/01/2025 - Added OAP02a bed days as CDP_O03
+
 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -52,8 +54,8 @@ PRINT @RPStart
 PRINT @RPEnd
 
 ---- Delete any rows which already exist in output table for this time period
---DELETE FROM [MHDInternal].[STAGING_CDP_O_OAPs]
---WHERE [Reporting_Period] BETWEEN @RPStart AND @RPEnd
+DELETE FROM [MHDInternal].[STAGING_CDP_O_OAPs]
+WHERE [Reporting_Period] BETWEEN @RPStart AND @RPEnd
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 1: CREATE MASTER TABLE 
@@ -63,7 +65,7 @@ STEP 1: CREATE MASTER TABLE
 SELECT 
 	   Reporting_Period_End as Reporting_Period,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 		 END AS CDP_Measure_ID,
 
@@ -96,7 +98,7 @@ UNION
 SELECT 
 	   Reporting_Period_End as Reporting_Period,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 		 END AS CDP_Measure_ID,
 
@@ -125,7 +127,7 @@ WHERE Metric IN ('OAP02a','OAP03a') --To confirm this is what's needed
 GROUP BY 	   
 	Reporting_Period_End,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 			END,
 	   CASE 
@@ -144,7 +146,7 @@ UNION
 SELECT 
 	   Reporting_Period_End as Reporting_Period,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 		 END AS CDP_Measure_ID,
 
@@ -173,7 +175,7 @@ UNION
 SELECT 
 	   Reporting_Period_End as Reporting_Period,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 		 END AS CDP_Measure_ID,
 
@@ -200,7 +202,7 @@ UNION
 SELECT 
 	   Reporting_Period_End as Reporting_Period,
 	   CASE 
-			WHEN Metric = 'OAP02a' THEN 'CDP_O01' --CHECK?
+			WHEN Metric = 'OAP02a' THEN 'CDP_O03' --CHECK?
 			WHEN Metric = 'OAP03a' THEN 'CDP_O02' --CHECK
 		 END AS CDP_Measure_ID,
 
@@ -621,8 +623,8 @@ STEP 5: ADD 'STR' VALUES & ISLATEST & LAST MODIFIED
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
 
 -- Set Is_Latest in current table as 0
---UPDATE [MHDInternal].[STAGING_CDP_O_OAPs]
---   SET Is_Latest = 0
+UPDATE [MHDInternal].[STAGING_CDP_O_OAPs]
+   SET Is_Latest = 0
 
 --Determine latest month of data for is_Latest
 SELECT MAX(Reporting_Period) as Reporting_Period 
@@ -630,7 +632,7 @@ SELECT MAX(Reporting_Period) as Reporting_Period
   FROM [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets]
 
 
---INSERT INTO [MHDInternal].[STAGING_CDP_O_OAPs]
+INSERT INTO [MHDInternal].[STAGING_CDP_O_OAPs]
 SELECT
 	   f.Reporting_Period,
 	   CASE WHEN i.Reporting_Period IS NOT NULL 
@@ -664,11 +666,15 @@ SELECT
 	   CAST(NULL as varchar)+'%' as Plan_Percentage_Achieved_STR,
 	   GETDATE() as Last_Modified
 
-INTO [MHDInternal].[STAGING_CDP_O_OAPs]
+--INTO [MHDInternal].[TEMP_STAGING_CDP_O_OAPs]
+--INTO [MHDInternal].[STAGING_CDP_O_OAPs]
   
 FROM [MHDInternal].[TEMP_CDP_O_OAPs_Measures_&_targets] f
 
 LEFT JOIN [MHDInternal].[TEMP_CDP_O_OAPs_Is_Latest] i ON f.Reporting_Period = i.Reporting_Period
+
+
+
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 6: QA - REMOVE UNSUPPORTED ORGS, CHECK FOR DUPLICATE ROWS
@@ -780,6 +786,8 @@ SELECT MAX(Reporting_Period)
   WHERE Measure_Value IS NOT NULL
 
 
+
+
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 STEP 7: DROP TEMP TABLES
 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
@@ -836,14 +844,14 @@ ADDITIONAL STEP - KEEPT COMMENTED OUT UNTIL NEEDED
 
 --FROM (SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
 --		FROM [MHDInternal].[Reference_CDP_Trajectories]
---	   WHERE CDP_Measure_ID IN('CDP_O01') -- ADD MEASURE IDS FOR LTP TRAJECTORY METRICS
+--	   WHERE CDP_Measure_ID IN('CDP_O03') -- ADD MEASURE IDS FOR LTP TRAJECTORY METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets
 		 
 --	   UNION
 
 --	  SELECT Reporting_Period, CDP_Measure_ID, CDP_Measure_Name, Org_Type, Org_Code, Org_Name, Measure_Type
 --		FROM [MHDInternal].[Reference_CDP_Plans] 
---	   WHERE CDP_Measure_ID IN('CDP_O01') -- ADD MEASURE IDS FOR PLANNING METRICS
+--	   WHERE CDP_Measure_ID IN('CDP_O03') -- ADD MEASURE IDS FOR PLANNING METRICS
 --	     AND Reporting_Period BETWEEN @RPStartTargets AND @RPEndTargets )_
 
 --INSERT INTO [MHDInternal].[STAGING_CDP_O_OAPs]
