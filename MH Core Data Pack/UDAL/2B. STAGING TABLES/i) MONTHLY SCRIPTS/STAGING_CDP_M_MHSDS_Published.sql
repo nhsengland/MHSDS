@@ -42,7 +42,9 @@ UPDATES:    JADE SYKES    07/12/2023 Change @RPEnd to remove "WHERE STATUS <> 'P
 								     (THERE USE TO BE A PROVISIONAL DATA WINDOW BUT NOW WE JUST PULL OUT MAX REPORTING_PERIOD)
 			KIRSTY WALKER 15/12/2023 Commented out the mapping to MPL as was causing double counting in output, the joins need to be done in a slightly different way, happy to talk thru :)
 
-			LOUISE SHUTTLEWORTH 21/06/24 Added in the two LOS measures to the script (MHS140a and MHS141a)  
+			LOUISE SHUTTLEWORTH 21/06/24 Added in the two LOS measures to the script (MHS140a and MHS141a)    
+
+			MW 16/01/2025 Added RI (MHS96) and IPS (MHS116) metrics
 
 ***********************************************************************************************************************************************************************************************************************************/
 
@@ -83,6 +85,10 @@ VALUES
 	,('CDP_M15','MHS110','MHSDS CYP Paired Scores (%)','Denominator','N')
 	,('CDP_M16','MHS140a','MHSDS LoS - Mean LoS for Adult Acute discharges','Mean','N') --try doing as a mean?
 	,('CDP_M17','MHS141a','MHSDS LoS - Mean LoS for Older Adult Acute discharges','Mean','N') --try doing as a mean?
+	--NEW IPS MEASURE
+	,('CDP_M19','MHS116','MHSDS Individual Placement and Support (IPS)','Numerator','Y')
+	--NEW RI MEASURE
+	,('CDP_M18','MHS96','MHSDS Restrictive Interventions per 1,000 bed days','Numerator','N') --# RI types
 
 
 /* PRE-STEPS - DATES */
@@ -878,6 +884,48 @@ LEFT JOIN [MHDInternal].[TEMP_CDP_M_MHSDS_Final_Extra_Orgs] e
 	  AND f.Org_Type = e.Org_Type
 	  AND f.Org_Code = e.Org_Code
 	  AND f.Measure_Type = e.Measure_Type
+
+-------- ADDED TO REPLACE DELETES BELOW
+
+LEFT JOIN (SELECT DISTINCT Organisation_Code AS Org_Code
+			FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+			WHERE Effective_To IS NULL 
+			AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP') AS SubICB
+	   ON f.Org_Code = SubICB.Org_Code
+	  AND f.Org_Type = 'SubICB'
+
+LEFT JOIN (SELECT DISTINCT STP_Code  AS Org_Code
+			FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+			WHERE Effective_To IS NULL 
+			AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP') AS ICB
+	   ON f.Org_Code = ICB.Org_Code
+	  AND f.Org_Type = 'ICB'
+
+LEFT JOIN (SELECT DISTINCT Region_Code  AS Org_Code
+			FROM [Reporting_UKHD_ODS].[Commissioner_Hierarchies]
+			WHERE Effective_To IS NULL 
+			AND NHSE_Organisation_Type = 'CLINICAL COMMISSIONING GROUP') AS Region
+	   ON f.Org_Code = Region.Org_Code
+	  AND f.Org_Type = 'Region'
+
+WHERE f.Region_Code NOT LIKE 'REG%'
+  AND f.Org_Code IS NOT NULL
+  AND f.Org_Code <> 'UNKNOWN'
+  AND ((f.Org_Type = 'SubICB' AND SubICB.Org_Code IS NOT NULL)
+		OR (f.Org_Type = 'ICB' AND ICB.Org_Code IS NOT NULL)
+		OR (f.Org_Type = 'Region' AND Region.Org_Code IS NOT NULL)
+		OR (f.Org_Type = 'Provider' AND f.Org_Code <> '36L')
+		OR f.Org_Type NOT IN ('SubICB', 'ICB', 'Region'))
+
+ORDER BY 1,
+		 3,
+		 CASE WHEN f.Org_Type = 'England' THEN 1
+			  WHEN f.Org_Type = 'Region' THEN 2
+			  WHEN f.Org_Type = 'ICB' THEN 3
+			  WHEN f.Org_Type = 'SubICB' THEN 4
+			  WHEN f.Org_Type = 'Provider' THEN 5
+			  ELSE 99 END,
+		 f.Org_Code
 
 
 /* STEP 5: QA - REMOVE UNSUPPORTED ORGS */
