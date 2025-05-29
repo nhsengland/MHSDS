@@ -80,7 +80,36 @@ SELECT DISTINCT
 	,ia.StartDateWardStay AS StartDateWardStay_first 
 	,ia.StartTimeWardStay AS StartTimeWardStay_first 
 	,ia.UniqMonthID AS WS_UniqMonthID_first
-	,ia.HospitalBedTypeMH AS HospitalBedTypeMH_first 
+	,CASE WHEN ia.HospitalBedTypeMH = '10' THEN '200'
+	WHEN ia.HospitalBedTypeMH = '11' THEN '201' 
+	WHEN ia.HospitalBedTypeMH = '12' THEN '202' 
+	WHEN ia.HospitalBedTypeMH = '13' THEN '203'  
+	WHEN ia.HospitalBedTypeMH = '14' THEN '204' 
+	WHEN ia.HospitalBedTypeMH = '15' THEN '205'
+	WHEN ia.HospitalBedTypeMH = '17' THEN '17' --V5 code, only applicable to data pre April 24
+	WHEN ia.HospitalBedTypeMH = '19' THEN '206'
+	WHEN ia.HospitalBedTypeMH = '20' THEN '207'
+	WHEN ia.HospitalBedTypeMH = '21' THEN '208' 
+	WHEN ia.HospitalBedTypeMH = '22' THEN '209'
+	WHEN ia.HospitalBedTypeMH = '40' THEN '210' 
+	WHEN ia.HospitalBedTypeMH = '39' THEN '211' 
+	WHEN ia.HospitalBedTypeMH = '35' THEN '35' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN ia.HospitalBedTypeMH = '36' THEN '36' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN ia.HospitalBedTypeMH = '37' THEN '37' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN ia.HospitalBedTypeMH = '38' THEN '38' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN ia.HospitalBedTypeMH = '23' THEN '300'
+	WHEN ia.HospitalBedTypeMH = '24' THEN '301' 
+	WHEN ia.HospitalBedTypeMH IN ('25','26') THEN '302' 
+	WHEN ia.HospitalBedTypeMH = '27' THEN '303' 
+	WHEN ia.HospitalBedTypeMH = '28' THEN '304'  
+	WHEN ia.HospitalBedTypeMH = '29' THEN '305' 
+	WHEN ia.HospitalBedTypeMH = '31' THEN '306' 
+	WHEN ia.HospitalBedTypeMH = '32' THEN '307'
+	WHEN ia.HospitalBedTypeMH = '33' THEN '308' 
+	WHEN ia.HospitalBedTypeMH = '34' THEN '309' 
+	WHEN ia.HospitalBedTypeMH = '30' THEN '30' --V5 code mapped to '310' OR '311' in V6 (not 1:1)
+	ELSE ia.HospitalBedTypeMH
+	END AS HospitalBedTypeMH_first --maps v5 codes to v6
 	,ia.WardLocDistanceHome
 	,p.LDStatus
 	,p.AutismStatus
@@ -117,7 +146,36 @@ SELECT
 	,i.StartTimeWardStay
 	,i.EndDateWardStay
 	,i.EndTimeWardStay
-	,i.HospitalBedTypeMH
+	,CASE WHEN i.HospitalBedTypeMH = '10' THEN '200'
+	WHEN i.HospitalBedTypeMH = '11' THEN '201' 
+	WHEN i.HospitalBedTypeMH = '12' THEN '202' 
+	WHEN i.HospitalBedTypeMH = '13' THEN '203'  
+	WHEN i.HospitalBedTypeMH = '14' THEN '204' 
+	WHEN i.HospitalBedTypeMH = '15' THEN '205'
+	WHEN i.HospitalBedTypeMH = '17' THEN '17' --V5 code, only applicable to data pre April 24
+	WHEN i.HospitalBedTypeMH = '19' THEN '206'
+	WHEN i.HospitalBedTypeMH = '20' THEN '207'
+	WHEN i.HospitalBedTypeMH = '21' THEN '208' 
+	WHEN i.HospitalBedTypeMH = '22' THEN '209'
+	WHEN i.HospitalBedTypeMH = '40' THEN '210' 
+	WHEN i.HospitalBedTypeMH = '39' THEN '211' 
+	WHEN i.HospitalBedTypeMH = '35' THEN '35' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN i.HospitalBedTypeMH = '36' THEN '36' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN i.HospitalBedTypeMH = '37' THEN '37' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN i.HospitalBedTypeMH = '38' THEN '38' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN i.HospitalBedTypeMH = '23' THEN '300'
+	WHEN i.HospitalBedTypeMH = '24' THEN '301' 
+	WHEN i.HospitalBedTypeMH IN ('25','26') THEN '302' 
+	WHEN i.HospitalBedTypeMH = '27' THEN '303' 
+	WHEN i.HospitalBedTypeMH = '28' THEN '304'  
+	WHEN i.HospitalBedTypeMH = '29' THEN '305' 
+	WHEN i.HospitalBedTypeMH = '31' THEN '306' 
+	WHEN i.HospitalBedTypeMH = '32' THEN '307'
+	WHEN i.HospitalBedTypeMH = '33' THEN '308' 
+	WHEN i.HospitalBedTypeMH = '34' THEN '309' 
+	WHEN i.HospitalBedTypeMH = '30' THEN '30' --V5 code mapped to '310' OR '311' in V6 (not 1:1)
+	ELSE i.HospitalBedTypeMH
+	END AS HospitalBedTypeMH --maps v5 codes to v6
 	,i.MHS502UniqID
 	,i.WardLocDistanceHome
 	,i.SiteIDOfTreat
@@ -206,11 +264,14 @@ SELECT
 	,a.StartTimeWardStay_first 
 	,a.WS_UniqMonthID_first
 	,a.HospitalBedTypeMH_first 
-	,COALESCE(w1b.NationalCodeDefinition, w1.Main_Description_60_Chars,'Missing/Invalid') AS BedType_first
+	,CASE 
+		WHEN a.HospitalBedTypeMH_first IN ('17','35','36','37','38','30') THEN CONCAT('V5: ',COALESCE(w1b.NationalCodeDefinition, w1.Main_Description_60_Chars),' (only applicable before April 2024)')
+		ELSE CONCAT('V6: ',COALESCE(w1b.NationalCodeDefinition, w1.Main_Description_60_Chars,'Missing/Invalid'))
+		END AS BedType_first
 	,CASE 
 		WHEN a.HospitalBedTypeMH_first IN ('10','11','12','200','201','202') THEN 'Adult Acute (ICB commissioned)' 
-		WHEN a.HospitalBedTypeMH_first IN ('13','14','15','16','17','18','19','20','21','22','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
-		WHEN a.HospitalBedTypeMH_first IN ('23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
+		WHEN a.HospitalBedTypeMH_first IN ('13','14','15','16','17','18','19','20','21','22','35','36','37','38','39','40','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
+		WHEN a.HospitalBedTypeMH_first IN ('23','24','25','26','27','28','29','30','31','32','33','34','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
 		ELSE 'Missing/Invalid' 
 	END as BedType_first_Category
 	,a.WardLocDistanceHome AS WardLocDistanceHome_first
@@ -222,13 +283,16 @@ SELECT
 	,z.StartTimeWardStay AS StartTimeWardStay_last
 	,z.UniqMonthID AS WS_UniqMonthID_last
 	,z.HospitalBedTypeMH AS HospitalBedTypeMH_last
-	,COALESCE(w2b.NationalCodeDefinition, w2.Main_Description_60_Chars,'Missing/Invalid') AS BedType_last
+	,CASE 
+		WHEN z.HospitalBedTypeMH IN ('17','35','36','37','38','30') THEN CONCAT('V5: ',COALESCE(w2b.NationalCodeDefinition, w2.Main_Description_60_Chars),' (only applicable before April 2024)')
+		ELSE CONCAT('V6: ',COALESCE(w2b.NationalCodeDefinition, w2.Main_Description_60_Chars,'Missing/Invalid'))
+		END AS BedType_last
 	,CASE 
 		WHEN z.HospitalBedTypeMH IN ('10','11','12','200','201','202') THEN 'Adult Acute (ICB commissioned)' 
-		WHEN z.HospitalBedTypeMH IN ('13','14','15','16','17','18','19','20','21','22','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
-		WHEN z.HospitalBedTypeMH IN ('23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
+		WHEN z.HospitalBedTypeMH IN ('13','14','15','16','17','18','19','20','21','22','35','36','37','38','39','40','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
+		WHEN z.HospitalBedTypeMH IN ('23','24','25','26','27','28','29','30','31','32','33','34','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
 		ELSE 'Missing/Invalid' 
-	END as BedType_last_Category
+		END as BedType_last_Category
 	,z.WardLocDistanceHome AS WardLocDistanceHome_last
 	,z.SiteIDOfTreat AS SiteIDOfTreat_last
 	-- Derivations 
@@ -560,10 +624,19 @@ SELECT
 		WHEN s.EthnicCategory IN ('R','S') THEN 'Other'
 		ELSE 'Missing/Invalid' END AS UpperEthnicity
 	,s.LSOA2011
-	,CAST((CASE 
-		WHEN dep.IMD_Decile IS NULL THEN 'Missing/invalid'
-		ELSE CAST(dep.IMD_Decile AS VARCHAR(15))
-		END) AS VARCHAR(15)) AS IMD_Decile
+	,CASE 
+		WHEN dep.IMD_Decile = '1' THEN '01 Most deprived'
+		WHEN dep.IMD_Decile = '2' THEN '02 More deprived'
+		WHEN dep.IMD_Decile = '3' THEN '03 More deprived'
+		WHEN dep.IMD_Decile = '4' THEN '04 More deprived'
+		WHEN dep.IMD_Decile = '5' THEN '05 More deprived'
+		WHEN dep.IMD_Decile = '6' THEN '06 Less deprived'
+		WHEN dep.IMD_Decile = '7' THEN '07 Less deprived'
+		WHEN dep.IMD_Decile = '8' THEN '08 Less deprived'
+		WHEN dep.IMD_Decile = '9' THEN '09 Less deprived'
+		WHEN dep.IMD_Decile = '10' THEN '10 Least deprived'
+		ELSE 'Missing/invalid'
+		END AS IMD_Decile
 	,r1.[Description] AS Diagnosis
 	,CASE WHEN r1.Category_1_Description = 'Mental retardation' THEN 'Intellectual disability' WHEN r1.Category_1_Description IS NULL THEN 'Missing/invalid' ELSE r1.Category_1_Description END AS DiagGroup 
 	,s.OrgIDProv AS [Provider code]
@@ -773,7 +846,36 @@ SELECT
 	,f.ReportingPeriodEndDate
 	,w.OrgIDProv
 	,w.SiteIDOfWard
-	,w.MHAdmittedPatientClass 
+	,CASE WHEN w.MHAdmittedPatientClass = '10' THEN '200'
+	WHEN w.MHAdmittedPatientClass = '11' THEN '201' 
+	WHEN w.MHAdmittedPatientClass = '12' THEN '202' 
+	WHEN w.MHAdmittedPatientClass = '13' THEN '203'  
+	WHEN w.MHAdmittedPatientClass = '14' THEN '204' 
+	WHEN w.MHAdmittedPatientClass = '15' THEN '205'
+	WHEN w.MHAdmittedPatientClass = '17' THEN '17' --V5 code, only applicable to data pre April 24
+	WHEN w.MHAdmittedPatientClass = '19' THEN '206'
+	WHEN w.MHAdmittedPatientClass = '20' THEN '207'
+	WHEN w.MHAdmittedPatientClass = '21' THEN '208' 
+	WHEN w.MHAdmittedPatientClass = '22' THEN '209'
+	WHEN w.MHAdmittedPatientClass = '40' THEN '210' 
+	WHEN w.MHAdmittedPatientClass = '39' THEN '211' 
+	WHEN w.MHAdmittedPatientClass = '35' THEN '35' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN w.MHAdmittedPatientClass = '36' THEN '36' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN w.MHAdmittedPatientClass = '37' THEN '37' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN w.MHAdmittedPatientClass = '38' THEN '38' --V5 code mapped to '212' OR '213' in v6 (not 1:1)
+	WHEN w.MHAdmittedPatientClass = '23' THEN '300'
+	WHEN w.MHAdmittedPatientClass = '24' THEN '301' 
+	WHEN w.MHAdmittedPatientClass IN ('25','26') THEN '302' 
+	WHEN w.MHAdmittedPatientClass = '27' THEN '303' 
+	WHEN w.MHAdmittedPatientClass = '28' THEN '304'  
+	WHEN w.MHAdmittedPatientClass = '29' THEN '305' 
+	WHEN w.MHAdmittedPatientClass = '31' THEN '306' 
+	WHEN w.MHAdmittedPatientClass = '32' THEN '307'
+	WHEN w.MHAdmittedPatientClass = '33' THEN '308' 
+	WHEN w.MHAdmittedPatientClass = '34' THEN '309' 
+	WHEN w.MHAdmittedPatientClass = '30' THEN '30' --V5 code mapped to '310' OR '311' in V6 (not 1:1)
+	ELSE w.MHAdmittedPatientClass
+	END AS MHAdmittedPatientClass --maps v5 codes to v6
 	,w.UniqWardCode
 	,SUM(CASE WHEN w.startDatewardstay BETWEEN f.ReportingPeriodStartDate AND f.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS WS_Started 
 	,SUM(CASE WHEN w.EndDateWardStay BETWEEN f.ReportingPeriodStartDate AND f.ReportingPeriodEndDate THEN 1 ELSE 0 END) AS WS_Ended
@@ -844,13 +946,16 @@ SELECT
 	,a.AvailBedDays
 	,a.ClosedBedDays 
 	,b.MHAdmittedPatientClass 
-	,COALESCE(bt2.NationalCodeDefinition, bt1.Main_Description_60_Chars,'Missing/Invalid') AS BedType
+	,CASE 
+		WHEN b.MHAdmittedPatientClass IN ('17','35','36','37','38','30') THEN CONCAT('V5: ',COALESCE(bt2.NationalCodeDefinition, bt1.Main_Description_60_Chars),' (only applicable before April 2024)')
+		ELSE CONCAT('V6: ',COALESCE(bt2.NationalCodeDefinition, bt1.Main_Description_60_Chars,'Missing/Invalid'))
+		END AS BedType
 	,CASE 
 		WHEN b.MHAdmittedPatientClass IN ('10','11','12','200','201','202') THEN 'Adult Acute (ICB commissioned)' 
-		WHEN b.MHAdmittedPatientClass IN ('13','14','15','16','17','18','19','20','21','22','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
-		WHEN b.MHAdmittedPatientClass IN ('23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
+		WHEN b.MHAdmittedPatientClass IN ('13','14','15','16','17','18','19','20','21','22','35','36','37','38','39','40','203','204','205','206','207','208','209','210','211','212','213') THEN 'Adult Specialist' 
+		WHEN b.MHAdmittedPatientClass IN ('23','24','25','26','27','28','29','30','31','32','33','34','300','301','302','303','304','305','306','307','308','309','310','311') THEN 'CYP' 
 		ELSE 'Missing/Invalid' 
-	END as BedType_Category
+		END as BedType_Category
 	,b.WS_Started 
 	,b.WS_Ended
 	,b.WS_Open
