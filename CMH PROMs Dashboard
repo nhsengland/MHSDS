@@ -1,0 +1,930 @@
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+CMH PROMS DASHBOARD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+--- DEFINE REPORTING PERIOD 
+
+DECLARE @START_RP INT
+DECLARE @END_RP INT
+DECLARE @ReportingPeriodEnd DATETIME
+DECLARE @ReportingPeriodStart DATETIME
+
+SET @START_RP = 1429 --April 2019 (when we first start monitoring CMH PROMs)
+
+SET @END_RP = (SELECT MAX(UniqMonthID) FROM MHDInternal.PreProc_Header) --WHERE Der_MostRecentFlag = 'Y')
+
+SET @ReportingPeriodStart = (SELECT MAX(ReportingPeriodStartDate)
+FROM MHDInternal.PreProc_Header
+WHERE UniqMonthID = @START_RP)
+
+SET @ReportingPeriodEnd = (SELECT MAX(ReportingPeriodEndDate)
+FROM MHDInternal.PreProc_Header
+WHERE UniqMonthID = @END_RP)
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL REFERRALS FOR CMH IN THE REPORTING PERIOD 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Ref') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Ref
+
+SELECT DISTINCT 
+	r.Person_ID
+	,r.UniqServReqID
+	,r.RecordNumber
+	,r.ServTeamTypeRefToMH
+	,r.PrimReasonReferralMH 
+	,r.Der_FY
+	,r.UniqMonthID
+	,r.ReportingPeriodStartDate 
+	,r.ReportingPeriodEndDate
+	,CASE WHEN r.ServDischDate between r.ReportingPeriodStartDate and r.ReportingPeriodEndDate then 'Closed' else 'Open' end as 'OpenStatus'
+	,r.OrgIDProv AS Provider_Code 
+	,COALESCE(o1.Organisation_Name,'Missing/Invalid') AS Provider_Name
+	,o1.ODS_Organisation_Type
+	,CASE 
+		WHEN o1.ODS_Organisation_Type = 'NHS TRUST' THEN 'NHS'
+		WHEN o1.ODS_Organisation_Type = 'CARE TRUST' THEN 'NHS' 
+		WHEN o1.ODS_Organisation_Type IN ('LOCAL AUTHORITY','LOCAL AUTHORITY SITE') THEN 'LOCAL AUTHORITY' 
+		WHEN o1.ODS_Organisation_Type IN ('INDEPENDENT SECTOR HEALTHCARE PROVIDER','INDEPENDENT SECTOR H/C PROVIDER SITE','NON-NHS ORGANISATION') THEN 'NON-NHS' 
+		ELSE 'Missing/Invalid' 
+	END as Provider_Type
+	,CASE 
+		WHEN r.Der_SubICBCode IN ('NONC','','UNK', 'X98') THEN 'Missing/invalid' 
+		WHEN o2.Organisation_Name IS NULL THEN 'Missing/invalid'
+		WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid'
+		ELSE COALESCE(cc.New_Code,r.Der_SubICBCode, 'Missing/Invalid') 
+		END AS SubICB_Code
+	,CASE WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid' ELSE COALESCE(o2.Organisation_Name,'Missing/invalid') END AS SubICB_Name
+	,CASE WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid' ELSE COALESCE(o2.STP_Code,'Missing/invalid') END AS ICB_Code
+	,CASE WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid' ELSE COALESCE(o2.STP_Name,'Missing/invalid') END AS ICB_Name
+	,CASE WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid' ELSE COALESCE(o2.Region_Code,'Missing/invalid') END AS Region_Code
+	,CASE WHEN o2.Region_Code IN ('REG001','UNK','REG002') THEN 'Missing/invalid' ELSE COALESCE(o2.Region_Name,'Missing/invalid') END AS Region_Name
+	,r.AgeServReferRecDate
+	,r.AgeRepPeriodEnd
+	,CASE WHEN r.Der_Gender = '1' THEN 'M' WHEN r.Gender = '2' THEN 'F' ELSE NULL END as Gender
+	,r.ReferralRequestReceivedDate
+	,r.ServDischDate
+	,CASE WHEN r.ServDischDate is null or r.ServDischDate > r.ReportingPeriodEndDate then r.ReportingPeriodEndDate else r.ServDischDate end as Der_EndDate ---if ServDischDate is null or after RP then use end of RP
+
+INTO MHDInternal.Temp_CMH_PROMs_Ref
+
+FROM MHDInternal.PreProc_Referral r 
+
+LEFT JOIN 
+	(SELECT i.Person_ID, i.UniqServReqID, COUNT(i.Der_HospSpellRecordOrder) AS Der_HospSpellCount
+	FROM MHDInternal.PreProc_Inpatients i
+	GROUP BY i.Person_ID, i.UniqServReqID) i ON i.Person_ID = r.Person_ID AND i.UniqServReqID = r.UniqServReqID -- to indentify referrals to inpatient services
+
+LEFT JOIN Reporting_UKHD_ODS.Provider_Hierarchies o1 ON r.OrgIDProv = o1.Organisation_Code --- providers 
+LEFT JOIN Internal_Reference.ComCodeChanges cc ON r.Der_SubICBCode = cc.Org_Code 
+LEFT JOIN Reporting_UKHD_ODS.Commissioner_Hierarchies o2 ON COALESCE(cc.New_Code,r.Der_SubICBCode ) = o2.Organisation_Code --- CCG / STP / Region 
+
+WHERE r.AgeServReferRecDate >= 18 ---Age at referral was 18 and over
+AND r.UniqMonthID BETWEEN @START_RP AND @END_RP 
+AND r.ReferralRequestReceivedDate >= '2019-04-01' 
+AND r.ReferRejectionDate IS NULL  
+AND i.Der_HospSpellCount IS NULL --- to exclude referrals with an associated hospital spell 
+AND (r.LADistrictAuth LIKE 'E%' OR r.LADistrictAuth IS NULL OR r.LADistrictAuth = '') -- to limit to those people whose commissioner is an English organisation 
+AND r.ServTeamTypeRefToMH in ('A06', 'A09', 'A08', 'A05', 'A16', 'A13', 'A12', 'A14') ----specific CMH service types + EIP
+AND (r.PrimReasonReferralMH <> '08' OR r.PrimReasonReferralMH IS NULL) -- exclude referrals for organic brain disorder
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET CONTACTS FOR ALL CMH REFERRALS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Contacts') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Contacts
+
+SELECT 
+	 r.Person_ID
+	,r.UniqServReqID
+	,r.UniqMonthID 
+	,r.ReportingPeriodEndDate
+	,r.RecordNumber
+	,a.Der_ContactDate
+	,a.Der_ActivityType
+	,a.AttendOrDNACode
+	,a.ConsMediumUsed
+	,a.Der_DirectContact
+	,ROW_NUMBER() OVER (PARTITION BY 
+                   a.Person_ID, 
+                   a.UniqServReqID
+                   ORDER BY a.Der_ContactDate ASC, a.Der_ContactTime ASC, a.Der_ActivityUniqID ASC) AS Der_ContactOrder -- removed partition by month 
+
+INTO MHDInternal.Temp_CMH_PROMs_Contacts
+
+FROM MHDInternal.Temp_CMH_PROMs_Ref r 
+
+INNER JOIN MHDInternal.PreProc_Activity a ON  a.UniqServReqID = r.UniqServReqID AND r.Person_ID = a.Person_ID and r.RecordNumber = a.RecordNumber
+
+WHERE a.Der_DirectContact = 1
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET CUMULATIVE ACTIVITY
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Contacts_Cumulative') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Contacts_Cumulative
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,r.RecordNumber
+	,r.UniqServReqID
+	,MAX(a.Der_ContactDate) as Der_LastContact
+	,SUM(a.Der_DirectContact) as Der_CumulativeContacts
+
+INTO MHDInternal.Temp_CMH_PROMs_Contacts_Cumulative
+
+FROM MHDInternal.Temp_CMH_PROMs_Ref r
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_Contacts a ON r.Person_ID = a.Person_ID AND r.UniqServReqID = a.UniqServReqID AND a.ReportingPeriodEndDate <= r.ReportingPeriodEndDate
+
+WHERE a.Der_DirectContact = 1
+
+GROUP BY r.ReportingPeriodEndDate, r.RecordNumber, r.UniqServReqID
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET ALL RELEVANT ASSESSMENTS USED FOR MEASURING CMH OUTCOMES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_All_Assessments') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_All_Assessments
+
+SELECT 
+	r.Person_ID
+	,r.UniqServReqID
+	,r.RecordNumber
+	,r.UniqMonthID
+	,r.ReportingPeriodEndDate
+	,r.Provider_Code
+	,a.Der_AssUniqID
+	,a.Der_AssTable
+	,a.Der_AssToolCompDate
+	,a.CodedAssToolType
+	,a.Der_PreferredTermSNOMED
+	,a.Der_AssessmentToolName
+	,a.Der_AssessmentCategory
+	,a.PersScore
+	,CASE WHEN Der_AssessmentToolName = 'DIALOG' AND PersScore = '8' THEN NULL ELSE a.Der_ValidScore END AS Der_ValidScore -- temp fix 
+	,a.Der_AssOrderAsc
+	,a.Der_AssOrderDesc
+
+INTO MHDInternal.Temp_CMH_PROMs_All_Assessments
+
+FROM MHDInternal.Temp_CMH_PROMs_Ref r 
+
+INNER JOIN MHDInternal.PreProc_Assessments a ON r.UniqServReqID = a.UniqServReqID AND r.Person_ID = a.Person_ID AND r.RecordNumber = a.RecordNumber
+
+WHERE (a.Der_AssessmentToolName IN ('DIALOG ','ReQoL (Recovering Quality of Life 10-item)') 
+		OR a.Der_PreferredTermSNOMED IN ('Goal-Based Outcomes tool goal progress chart - goal 1 score','Goal-Based Outcomes tool goal progress chart - goal 2 score','Goal-Based Outcomes tool goal progress chart - goal 3 score'))
+
+AND ISNUMERIC(a.PersScore) = 1 ---valid PersScores only
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET PAIRED PROMS
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_Paired_PROMs') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_Paired_PROMs
+
+SELECT 
+	r.Person_ID
+	,r.UniqServReqID
+	,r.RecordNumber
+	,r.ServTeamTypeRefToMH
+	,r.Der_FY
+	,r.UniqMonthID
+	,r.ReportingPeriodEndDate
+	,r.Provider_Code
+	,r.AgeServReferRecDate AS Age
+	,r.Gender
+	,r.ReferralRequestReceivedDate
+	,r.ServDischDate
+	,a1.Der_AssUniqID
+	,a1.Der_PreferredTermSNOMED
+	,a1.Der_AssessmentToolName
+	,a1.Der_AssessmentCategory
+	,a1.Der_AssToolCompDate AS BaselineDate	
+	,CAST(a1.PersScore AS NUMERIC) as BaselineScore
+	,a2.Der_AssToolCompDate AS FollowUpDate	
+	,CAST(a2.PersScore AS NUMERIC) as FollowUpScore
+	,CAST(a2.PersScore AS NUMERIC) - CAST(a1.PersScore AS NUMERIC) AS ChangeScore
+	,ROW_NUMBER() OVER (PARTITION BY r.Person_ID, r.UniqServReqID, r.ReportingPeriodEndDate, a1.Der_PreferredTermSNOMED ORDER BY a2.Der_AssToolCompDate DESC, a2.Der_AssOrderAsc) AS LatestInMonth
+	,ISNULL(a2.Der_AssOrderAsc, 1) AS Cumulative_Count
+	,CASE WHEN a1.Der_AssessmentToolName = 'DIALOG' THEN 1
+		  WHEN a1.Der_AssessmentToolName = 'Goal Based Outcomes (GBO)'THEN 3
+		  WHEN a1.Der_AssessmentToolName = 'ReQoL (Recovering Quality of Life 10-item)' THEN 5
+		  END AS RCI_Threshold
+
+INTO MHDInternal.Temp_CMH_Paired_PROMs
+
+FROM MHDInternal.Temp_CMH_PROMs_Ref r 
+
+INNER JOIN MHDInternal.Temp_CMH_PROMs_All_Assessments a1 
+	ON r.Person_ID = a1.Person_ID 
+	AND r.UniqServReqID = a1.UniqServReqID 
+	AND a1.ReportingPeriodEndDate <= r.ReportingPeriodEndDate
+	AND a1.Der_AssOrderAsc = 1
+	AND a1.Der_ValidScore = 'Y'
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_All_Assessments a2 
+	ON r.Person_ID = a2.Person_ID 
+	AND r.UniqServReqID = a2.UniqServReqID 
+	AND a1.Der_PreferredTermSNOMED = a2.Der_PreferredTermSNOMED
+	AND a2.ReportingPeriodEndDate <= r.ReportingPeriodEndDate
+	AND a2.Der_AssOrderAsc > 1
+	AND a2.Der_ValidScore = 'Y' 
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE INTO MASTER TABLE 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Master') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Master
+
+SELECT 
+	r.Person_ID
+	,r.UniqServReqID
+	,r.RecordNumber
+	,CASE 
+		WHEN r.ServTeamTypeRefToMH = 'A05' THEN 'Primary Care Mental Health Service' 
+		WHEN r.ServTeamTypeRefToMH = 'A06' THEN 'Community Mental Health Team - Functional' 
+		WHEN r.ServTeamTypeRefToMH = 'A08' THEN 'Assertive Outreach Team' 
+		WHEN r.ServTeamTypeRefToMH = 'A09' THEN 'Community Rehabilitation Service' 
+		WHEN r.ServTeamTypeRefToMH = 'A12' THEN 'Psychotherapy Service' 
+		WHEN r.ServTeamTypeRefToMH = 'A13' THEN 'Psychological Therapy Service (non IAPT)' 
+		WHEN r.ServTeamTypeRefToMH = 'A16' THEN 'Personality Disorder Service' 
+		WHEN r.ServTeamTypeRefToMH = 'A14' THEN 'Early Intervention Team for Psychosis' 
+	END AS Der_TeamType
+	,COALESCE(z.Main_Description_60_Chars, 'Missing/invalid') AS PrimReason 
+	,r.Der_FY
+	,r.UniqMonthID
+	,r.ReportingPeriodStartDate 
+	,r.ReportingPeriodEndDate
+	,r.OpenStatus
+	,r.Provider_Code 
+	,r.Provider_Name
+	,r.ODS_Organisation_Type
+	,r.Provider_Type
+	,r.Region_Code 
+	,r.Region_Name
+	,r.SubICB_Code
+	,r.SubICB_Name
+	,r.ICB_Code
+	,r.ICB_Name
+	,r.AgeServReferRecDate
+	,r.AgeRepPeriodEnd
+	,CASE WHEN r.AgeServReferRecDate BETWEEN 18 and 64 THEN '18-64' ELSE '65+' END AS AgeGroup_At_Ref
+	,CASE WHEN r.AgeRepPeriodEnd BETWEEN 18 and 64 THEN '18-64' ELSE '65+' END AS AgeGroup_At_RepEnd
+	,r.Gender
+	,r.ReferralRequestReceivedDate
+	,r.ServDischDate
+	,DATEDIFF(DD, r.ReferralRequestReceivedDate, ISNULL(r.ServDischDate, r.ReportingPeriodEndDate)) AS Der_RefLength
+	,ISNULL(cu.Der_CumulativeContacts, 0) AS Der_CumulativeContacts
+	,cu.Der_LastContact
+	,p.Der_AssessmentToolName
+	,p.Der_PreferredTermSNOMED
+	,p.BaselineDate
+	,p.BaselineScore
+	,p.FollowUpDate
+	,p.FollowUpScore
+	,p.ChangeScore
+	,p.RCI_Threshold
+	,CASE WHEN p.ChangeScore > 0 AND ABS(p.ChangeScore) >= p.RCI_Threshold THEN 1
+		  ELSE 0
+		  END AS Reliable_Improvement
+	,CASE WHEN ABS(p.ChangeScore) < RCI_Threshold THEN 1
+	      ELSE 0
+		  END AS NoChange
+	,CASE WHEN p.ChangeScore < 0 AND ABS(p.ChangeScore) >= p.RCI_Threshold THEN 1
+	      ELSE 0
+		  END AS Reliable_Deterioration
+	,CASE WHEN p.Der_AssessmentToolName = 'ReQoL (Recovering Quality of Life 10-item)' THEN 25 ELSE NULL END AS Clinical_CutOff
+	,p.Cumulative_Count
+	,c.Der_ContactDate AS Der_SecondContact
+	,ROW_NUMBER()OVER(PARTITION BY r.UniqServReqID, r.UniqMonthID, r.ServTeamTypeRefToMH ORDER BY r.RecordNumber DESC) AS Ref_Dup --- flag to remove duplicated referral/team records when joining to outcomes 
+
+INTO MHDInternal.Temp_CMH_PROMs_Master
+
+FROM MHDInternal.Temp_CMH_PROMs_Ref r
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_Contacts_Cumulative cu ON r.RecordNumber = cu.RecordNumber AND r.UniqServReqID = cu.UniqServReqID
+
+LEFT JOIN MHDInternal.Temp_CMH_Paired_PROMs p ON r.RecordNumber = p.RecordNumber AND r.UniqServReqID = p.UniqServReqID AND p.LatestInMonth = 1 
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_Contacts c ON r.Person_ID = c.Person_ID AND r.UniqServReqID = c.UniqServReqID AND c.Der_ContactOrder = 2 AND c.ReportingPeriodEndDate <= r.ReportingPeriodEndDate
+
+LEFT JOIN UKHD_Data_Dictionary.Reason_For_Referral_To_Mental_Health_SCD z ON r.PrimReasonReferralMH = z.Main_Code_Text AND Is_Latest = 1 
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE REFERRAL METRICS TO USE AS DENOMOINATORS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_Ref') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref
+
+SELECT
+	ReportingPeriodEndDate
+	,Provider_Type
+	,Provider_Code
+	,Provider_Name
+	,SubICB_Code
+	,SubICB_Name
+	,ICB_Code
+	,ICB_Name
+	,Region_Code
+	,Region_Name
+	,Der_TeamType
+	,AgeGroup_At_Ref
+	---Open Referrals
+	,SUM(CASE WHEN Ref_Dup = 1 AND OpenStatus = 'Open' THEN 1 ELSE 0 END) AS OpenReferrals
+	,SUM(CASE WHEN Ref_Dup = 1 AND OpenStatus = 'Open'  AND Der_CumulativeContacts >= 2 THEN 1 ELSE 0 END) AS OpenReferrals2PlusContacts
+	,SUM(CASE WHEN Ref_Dup = 1 AND OpenStatus = 'Open'  AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 THEN 1 ELSE 0 END) AS OpenReferrals2PlusContacts6Months
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND BaselineDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS OpenBaselinePROM
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS OpenPairedPROM
+	---Closed Referrals 
+	,SUM(CASE WHEN Ref_Dup = 1 AND OpenStatus = 'Closed' THEN 1 ELSE 0 END) AS ClosedReferrals
+	,SUM(CASE WHEN Ref_Dup = 1 AND OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 THEN 1 ELSE 0 END) AS ClosedReferrals2PlusContacts
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND BaselineDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS ClosedBaselinePROM
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS ClosedPairedPROM
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_Ref
+
+FROM MHDInternal.Temp_CMH_PROMs_Master
+
+GROUP BY ReportingPeriodEndDate, Provider_Type, Provider_Code, Provider_Name, SubICB_Code, SubICB_Name, ICB_Code, ICB_Name, Region_Code, Region_Name, Der_TeamType, AgeGroup_At_Ref
+
+
+
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_Ref2') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref2
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,Provider_Type
+	,Provider_Code
+	,Provider_Name
+	,SubICB_Code
+	,SubICB_Name
+	,ICB_Code
+	,ICB_Name
+	,Region_Code
+	,Region_Name
+	,Der_TeamType
+	,AgeGroup_At_Ref
+	,a.Der_AssessmentToolName
+	,a.Der_PreferredTermSNOMED
+	,r.OpenReferrals
+	,r.OpenReferrals2PlusContacts
+	,r.OpenReferrals2PlusContacts6Months
+	,r.OpenBaselinePROM
+	,r.OpenPairedPROM
+	,r.ClosedReferrals
+	,r.ClosedReferrals2PlusContacts
+	,r.ClosedBaselinePROM
+	,r.ClosedPairedPROM
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_Ref2
+	
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Ref r, (SELECT DISTINCT Der_AssessmentToolName, Der_PreferredTermSNOMED FROM MHDInternal.Temp_CMH_PROMs_All_Assessments) a
+
+
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_Ref3') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref3
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,Provider_Type
+	,Provider_Code
+	,Provider_Name
+	,SubICB_Code
+	,SubICB_Name
+	,ICB_Code
+	,ICB_Name
+	,Region_Code
+	,Region_Name
+	,Der_TeamType
+	,AgeGroup_At_Ref
+	,a.Der_AssessmentToolName
+	,'All' AS Der_PreferredTermSNOMED
+	,r.OpenReferrals
+	,r.OpenReferrals2PlusContacts
+	,r.OpenReferrals2PlusContacts6Months
+	,r.OpenBaselinePROM
+	,r.OpenPairedPROM
+	,r.ClosedReferrals
+	,r.ClosedReferrals2PlusContacts
+	,r.ClosedBaselinePROM
+	,r.ClosedPairedPROM
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_Ref3
+	
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Ref r, (SELECT DISTINCT Der_AssessmentToolName FROM MHDInternal.Temp_CMH_PROMs_All_Assessments) a
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE INDIVIDUAL OUTCOME-LEVEL METRICS 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_OM') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_OM
+
+SELECT
+	m.ReportingPeriodEndDate
+	,m.Provider_Type
+	,m.Provider_Code
+	,m.Provider_Name
+	,m.SubICB_Code
+	,m.SubICB_Name
+	,m.ICB_Code
+	,m.ICB_Name
+	,m.Region_Code
+	,m.Region_Name
+	,m.Der_TeamType
+	,m.AgeGroup_At_Ref
+	,m.Der_AssessmentToolName
+	,m.Der_PreferredTermSNOMED
+	---Open Referrals
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND BaselineDate IS NOT NULL THEN 1 ELSE 0 END) AS OpenBaselinePROM
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN 1 ELSE 0 END) AS OpenPairedPROM
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL AND Reliable_Improvement = 1 THEN 1 ELSE 0 END) AS OpenPairedPROMImprovement
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL AND Reliable_Deterioration = 1 THEN 1 ELSE 0 END) AS OpenPairedPROMDeterioration
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL AND NoChange = 1 THEN 1 ELSE 0 END) AS OpenPairedPROMNoChange-- NEW 
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL AND BaselineScore < Clinical_CutOff THEN 1 ELSE 0 END) AS OpenPairedPROMAboveClinicalCutOff -- changed
+	,SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL AND BaselineScore < Clinical_CutOff AND FollowUpScore >= Clinical_CutOff AND Reliable_Improvement = 1 THEN 1 ELSE 0 END) AS OpenPairedPROMAboveClinicalCutOffReliableRecovery
+	,CAST(SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN BaselineScore ELSE 0 END) AS INT) AS OpenBaselineScoreSum
+	,CAST(SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN FollowUpScore ELSE 0 END) AS INT) AS OpenFollowUpScoreSum
+	,CAST(SUM(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN ChangeScore ELSE 0 END) AS INT) AS OpenChangeScoreSum
+	---Closed Referrals 
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND BaselineDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedBaselinePROM
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN 1 ELSE 0 END) AS ClosedPairedPROM
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL AND Reliable_Improvement = 1 THEN 1 ELSE 0 END) AS ClosedPairedPROMImprovement
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL AND Reliable_Deterioration = 1 THEN 1 ELSE 0 END) AS ClosedPairedPROMDeterioration
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL AND NoChange = 1 THEN 1 ELSE 0 END) AS ClosedPairedPROMNoChange -- NEW
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL AND BaselineScore < Clinical_CutOff THEN 1 ELSE 0 END) AS ClosedPairedPROMAboveClinicalCutOff -- change
+	,SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL AND BaselineScore < Clinical_CutOff AND FollowUpScore >= Clinical_CutOff AND Reliable_Improvement = 1 THEN 1 ELSE 0 END) AS ClosedPairedPROMAboveClinicalCutOffReliableRecovery
+	,CAST(SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN BaselineScore ELSE 0 END) AS INT) AS ClosedBaselineScoreSum
+	,CAST(SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN FollowUpScore ELSE 0 END) AS INT) AS ClosedFollowUpScoreSum
+	,CAST(SUM(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN ChangeScore ELSE 0 END) AS INT) AS ClosedChangeScoreSum
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_OM
+
+FROM MHDInternal.Temp_CMH_PROMs_Master m
+
+WHERE m.Der_PreferredTermSNOMED IS NOT NULL 
+
+GROUP BY m.ReportingPeriodEndDate, m.Provider_Type, m.Provider_Code, m.Provider_Name, m.SubICB_Code, m.SubICB_Name, m.ICB_Code, m.ICB_Name
+, m.Region_Code, m.Region_Name, m.Der_AssessmentToolName, m.Der_PreferredTermSNOMED, m.Der_TeamType, m.AgeGroup_At_Ref
+, m.Der_AssessmentToolName, m.Der_PreferredTermSNOMED
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+AGGREGATE COMPLETION MEASURES AT PROM LEVEL 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_OMType') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_OMType
+
+SELECT
+	m.ReportingPeriodEndDate
+	,m.Provider_Type
+	,m.Provider_Code
+	,m.Provider_Name
+	,m.SubICB_Code
+	,m.SubICB_Name
+	,m.ICB_Code
+	,m.ICB_Name
+	,m.Region_Code
+	,m.Region_Name
+	,m.Der_TeamType
+	,m.AgeGroup_At_Ref
+	,m.Der_AssessmentToolName
+	,'All' AS Der_PreferredTermSNOMED
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND BaselineDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS OpenBaselinePROM
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Open' AND Der_CumulativeContacts >= 2 AND Der_RefLength >= 180 AND FollowUpDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS OpenPairedPROM
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND BaselineDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS ClosedBaselinePROM
+	,COUNT(DISTINCT(CASE WHEN OpenStatus = 'Closed' AND Der_CumulativeContacts >= 2 AND FollowUpDate IS NOT NULL THEN CONCAT(UniqServReqID, Der_TeamType) ELSE NULL END)) AS ClosedPairedPROM
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_OMType
+
+FROM MHDInternal.Temp_CMH_PROMs_Master m
+
+WHERE m.Der_PreferredTermSNOMED IS NOT NULL 
+
+GROUP BY m.ReportingPeriodEndDate, m.Provider_Type, m.Provider_Code, m.Provider_Name, m.SubICB_Code, m.SubICB_Name, m.ICB_Code, m.ICB_Name
+, m.Region_Code, m.Region_Name, m.Der_AssessmentToolName, m.Der_TeamType, m.AgeGroup_At_Ref
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+COMBINE AGGREGATED MEASURES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Agg_Comb') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Comb
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,r.Provider_Type
+	,r.Provider_Code
+	,r.Provider_Name
+	,r.SubICB_Code
+	,r.SubICB_Name
+	,r.ICB_Code
+	,r.ICB_Name
+	,r.Region_Code
+	,r.Region_Name
+	,r.Der_TeamType
+	,r.AgeGroup_At_Ref
+	,r.Der_AssessmentToolName
+	,r.Der_PreferredTermSNOMED
+	,r.OpenReferrals
+	,r.OpenReferrals2PlusContacts
+	,r.OpenReferrals2PlusContacts6Months
+	,r.OpenReferrals2PlusContacts6Months AS OpenReferrals2PlusContacts6Months2
+	,ISNULL(a.OpenBaselinePROM,0) AS OpenBaselinePROM
+	,ISNULL(a.OpenBaselinePROM,0) AS OpenBaselinePROM2-- dup for denomiantor
+	,ISNULL(a.OpenPairedPROM,0) AS OpenPairedPROM
+	,ISNULL(a.OpenPairedPROM,0) AS OpenPairedPROM2 -- dup for denominator
+	,ISNULL(OpenPairedPROMImprovement,0) AS OpenPairedPROMImprovement 
+	,ISNULL(OpenPairedPROMImprovement,0) AS OpenPairedPROMImprovement_alt --- using all open referrals as denom 
+	,ISNULL(OpenPairedPROMDeterioration,0) AS OpenPairedPROMDeterioration
+	,ISNULL(OpenPairedPROMNoChange,0) AS OpenPairedPROMNoChange -- NEW 
+	,ISNULL(OpenPairedPROMAboveClinicalCutOff,0) AS OpenPairedPROMAboveClinicalCutOff -- changed
+	,ISNULL(OpenPairedPROMAboveClinicalCutOffReliableRecovery,0) AS OpenPairedPROMAboveClinicalCutOffReliableRecovery
+	,ISNULL(OpenBaselineScoreSum,0) AS OpenBaselineScoreSum
+	,ISNULL(OpenFollowUpScoreSum,0) AS OpenFollowUpScoreSum
+	,ISNULL(OpenChangeScoreSum,0) AS OpenChangeScoreSum
+	---Closed Referrals 
+	,r.ClosedReferrals
+	,r.ClosedReferrals2PlusContacts
+	,r.ClosedReferrals2PlusContacts AS ClosedReferrals2PlusContacts2
+	,ISNULL(a.ClosedBaselinePROM,0) AS ClosedBaselinePROM
+	,ISNULL(a.ClosedBaselinePROM,0) AS ClosedBaselinePROM2 -- dup for denomiantor
+	,ISNULL(a.ClosedPairedPROM,0) AS ClosedPairedPROM
+	,ISNULL(a.ClosedPairedPROM,0) AS ClosedPairedPROM2 -- dup for denominator
+	,ISNULL(ClosedPairedPROMImprovement,0) AS ClosedPairedPROMImprovement
+	,ISNULL(ClosedPairedPROMImprovement,0) AS ClosedPairedPROMImprovement_alt -- using all closed refs as denom
+	,ISNULL(ClosedPairedPROMDeterioration,0) AS ClosedPairedPROMDeterioration
+	,ISNULL(ClosedPairedPROMNoChange,0) AS ClosedPairedPROMNoChange -- NEW
+	,ISNULL(ClosedPairedPROMAboveClinicalCutOff,0) AS ClosedPairedPROMAboveClinicalCutOff 
+	,ISNULL(ClosedPairedPROMAboveClinicalCutOffReliableRecovery,0) AS ClosedPairedPROMAboveClinicalCutOffReliableRecovery
+	,ISNULL(ClosedBaselineScoreSum,0) AS ClosedBaselineScoreSum
+	,ISNULL(ClosedFollowUpScoreSum,0) AS ClosedFollowUpScoreSum
+	,ISNULL(ClosedChangeScoreSum,0) AS ClosedChangeScoreSum
+
+INTO MHDInternal.Temp_CMH_PROMs_Agg_Comb
+
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Ref2 r
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_Agg_OM a ON 
+	r.ReportingPeriodEndDate = a.ReportingPeriodEndDate
+	AND r.Provider_Code = a.Provider_Code
+	AND r.SubICB_Code = a.SubICB_Code
+	AND r.Der_TeamType = a.Der_TeamType
+	AND r.AgeGroup_At_Ref = a.AgeGroup_At_Ref
+	AND r.Der_PreferredTermSNOMED = a.Der_PreferredTermSNOMED
+
+
+--- Add in paired outcome for PROM type 
+INSERT INTO MHDInternal.Temp_CMH_PROMs_Agg_Comb 
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,r.Provider_Type
+	,r.Provider_Code
+	,r.Provider_Name
+	,r.SubICB_Code
+	,r.SubICB_Name
+	,r.ICB_Code
+	,r.ICB_Name
+	,r.Region_Code
+	,r.Region_Name
+	,r.Der_TeamType
+	,r.AgeGroup_At_Ref
+	,r.Der_AssessmentToolName
+	,r.Der_PreferredTermSNOMED
+	,r.OpenReferrals
+	,r.OpenReferrals2PlusContacts
+	,r.OpenReferrals2PlusContacts6Months
+	,r.OpenReferrals2PlusContacts6Months AS OpenReferrals2PlusContacts6Months2
+	,ISNULL(a.OpenBaselinePROM,0) AS OpenBaselinePROM
+	,ISNULL(a.OpenBaselinePROM,0) AS OpenBaselinePROM2
+	,ISNULL(a.OpenPairedPROM,0) AS OpenPairedPROM
+	,ISNULL(a.OpenPairedPROM,0) AS OpenPairedPROM2
+	,'' AS OpenPairedPROMImprovement
+	,'' AS OpenPairedPROMImprovement_alt
+	,'' AS OpenPairedPROMDeterioration
+	,'' AS OpenPairedPROMNoChange -- NEW 
+	,'' AS OpenPairedPROMAboveClinicalCutOff -- changed
+	,'' AS OpenPairedPROMAboveClinicalCutOffReliableRecovery
+	,'' AS OpenBaselineScoreSum
+	,'' AS OpenFollowUpScoreSum
+	,'' AS OpenChangeScoreSum
+
+	,r.ClosedReferrals
+	,r.ClosedReferrals2PlusContacts
+	,r.ClosedReferrals2PlusContacts AS ClosedReferrals2PlusContacts2
+	,ISNULL(a.ClosedBaselinePROM,0) AS ClosedBaselinePROM
+	,ISNULL(a.ClosedBaselinePROM,0) AS ClosedBaselinePROM2
+	,ISNULL(a.ClosedPairedPROM,0) AS ClosedPairedPROM
+	,ISNULL(a.ClosedPairedPROM,0) AS ClosedPairedPROM2
+	,'' AS ClosedPairedPROMImprovement
+	,'' AS ClosedPairedPROMImprovement2
+	,'' AS ClosedPairedPROMDeterioration
+	,'' AS ClosedPairedPROMNoChange -- NEW
+	,'' AS ClosedPairedPROMAboveClinicalCutOff -- change
+	,'' AS ClosedPairedPROMAboveClinicalCutOffReliableRecovery
+	,'' AS ClosedBaselineScoreSum
+	,'' AS ClosedFollowUpScoreSum
+	,'' AS ClosedChangeScoreSum
+
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Ref3 r
+
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_Agg_OMType a ON 
+	r.ReportingPeriodEndDate = a.ReportingPeriodEndDate
+	AND r.Provider_Code = a.Provider_Code
+	AND r.SubICB_Code = a.SubICB_Code
+	AND r.Der_TeamType = a.Der_TeamType
+	AND r.AgeGroup_At_Ref = a.AgeGroup_At_Ref
+	AND r.Der_AssessmentToolName = a.Der_AssessmentToolName
+	AND r.Der_PreferredTermSNOMED = a.Der_PreferredTermSNOMED 
+
+
+INSERT INTO MHDInternal.Temp_CMH_PROMs_Agg_Comb 
+
+SELECT 
+	r.ReportingPeriodEndDate
+	,r.Provider_Type
+	,r.Provider_Code
+	,r.Provider_Name
+	,r.SubICB_Code
+	,r.SubICB_Name
+	,r.ICB_Code
+	,r.ICB_Name
+	,r.Region_Code
+	,r.Region_Name
+	,r.Der_TeamType
+	,r.AgeGroup_At_Ref
+	,'All' AS Der_AssessmentToolName
+	,'All' AS Der_PreferredTermSNOMED
+	,r.OpenReferrals
+	,r.OpenReferrals2PlusContacts
+	,r.OpenReferrals2PlusContacts6Months
+	,r.OpenReferrals2PlusContacts6Months AS OpenReferrals2PlusContacts6Months2
+	,ISNULL(r.OpenBaselinePROM,0) AS OpenBaselinePROM
+	,ISNULL(r.OpenBaselinePROM,0) AS OpenBaselinePROM2
+	,ISNULL(r.OpenPairedPROM,0) AS OpenPairedPROM
+	,ISNULL(r.OpenPairedPROM,0) AS OpenPairedPROM2
+	,'' AS OpenPairedPROMImprovement
+	,'' AS OpenPairedPROMImprovement_alt
+	,'' AS OpenPairedPROMDeterioration
+	,'' AS OpenPairedPROMNoChange -- NEW 
+	,'' AS OpenPairedPROMAboveClinicalCutOff -- changed
+	,'' AS OpenPairedPROMAboveClinicalCutOffReliableRecovery
+	,'' AS OpenBaselineScoreSum
+	,'' AS OpenFollowUpScoreSum
+	,'' AS OpenChangeScoreSum
+
+	,r.ClosedReferrals
+	,r.ClosedReferrals2PlusContacts
+	,r.ClosedReferrals2PlusContacts AS ClosedReferrals2PlusContacts2
+	,ISNULL(r.ClosedBaselinePROM,0) AS ClosedBaselinePROM
+	,ISNULL(r.ClosedBaselinePROM,0) AS ClosedBaselinePROM2
+	,ISNULL(r.ClosedPairedPROM,0) AS ClosedPairedPROM
+	,ISNULL(r.ClosedPairedPROM,0) AS ClosedPairedPROM2
+	,'' AS ClosedPairedPROMImprovement
+	,'' AS ClosedPairedPROMImprovement2
+	,'' AS ClosedPairedPROMDeterioration
+	,'' AS ClosedPairedPROMNoChange -- NEW
+	,'' AS ClosedPairedPROMAboveClinicalCutOff -- change
+	,'' AS ClosedPairedPROMAboveClinicalCutOffReliableRecovery
+	,'' AS ClosedBaselineScoreSum
+	,'' AS ClosedFollowUpScoreSum
+	,'' AS ClosedChangeScoreSum
+
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Ref r
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+GET STANDARD DEVIATION OF BASELINE SCORES (FOR EFFECT SIZE CALCULATIONS)
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_SD_Control') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_SD_Control
+
+SELECT
+	Der_PreferredTermSNOMED
+	,COUNT(*) AS n
+	,STDEV(BaselineScore) AS SD_Control
+
+INTO MHDInternal.Temp_CMH_PROMs_SD_Control
+
+FROM MHDInternal.Temp_CMH_PROMs_Master
+
+WHERE BaselineDate BETWEEN ReportingPeriodStartDate AND ReportingPeriodEndDate -- changed 
+
+GROUP BY Der_PreferredTermSNOMED
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+UNPIVOT FOR DASHBOARD EXTRACT 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+IF OBJECT_ID ('MHDInternal.Temp_CMH_PROMs_Pivot') IS NOT NULL
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Pivot
+
+SELECT
+	ReportingPeriodEndDate
+	,Provider_Type
+	,Provider_Code
+	,Provider_Name
+	,SubICB_Code
+	,SubICB_Name
+	,ICB_Code
+	,ICB_Name
+	,Region_Code
+	,Region_Name
+	,Der_AssessmentToolName
+	,Der_PreferredTermSNOMED
+	,Der_TeamType
+	,AgeGroup_At_Ref
+	,MeasureName
+	,MeasureValue
+	,CASE 
+		WHEN MeasureName = 'OpenBaselinePROM' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROM' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROMImprovement' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMImprovement_alt' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROMDeterioration' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMNoChange' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMAboveClinicalCutOffReliableRecovery' THEN OpenPairedPROMAboveClinicalCutOff 
+		WHEN MeasureName = 'OpenBaselineScoreSum' THEN OpenPairedPROM2 -- mean baseline for paired scores only 
+		WHEN MeasureName = 'OpenFollowUpScoreSum' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenChangeScoreSum' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'ClosedBaselinePROM' THEN ClosedReferrals2PlusContacts2
+		WHEN MeasureName = 'ClosedPairedPROM' THEN ClosedReferrals2PlusContacts2
+		WHEN MeasureName = 'ClosedPairedPROMImprovement' THEN ClosedPairedPROM2 
+		WHEN MeasureName = 'ClosedPairedPROMImprovement_alt' THEN ClosedReferrals2PlusContacts2 
+		WHEN MeasureName = 'ClosedPairedPROMDeterioration' THEN ClosedPairedPROM2
+		WHEN MeasureName = 'ClosedPairedPROMNoChange' THEN ClosedPairedPROM2
+		WHEN MeasureName = 'ClosedPairedPROMAboveClinicalCutOffReliableRecovery' THEN ClosedPairedPROMAboveClinicalCutOff
+		WHEN MeasureName = 'ClosedBaselineScoreSum' THEN ClosedPairedPROM2 -- mean baseline for paired scores only 
+		WHEN MeasureName = 'ClosedFollowUpScoreSum' THEN ClosedPairedPROM2 
+		WHEN MeasureName = 'ClosedChangeScoreSum' THEN ClosedPairedPROM2
+	END AS Denominator
+
+INTO MHDInternal.Temp_CMH_PROMs_Pivot
+
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Comb a
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(--OpenReferrals, OpenReferrals2PlusContacts, OpenReferrals2PlusContacts6Months, -- don't really need these
+		OpenBaselinePROM, OpenPairedPROM,
+		 --ClosedReferrals, ClosedReferrals2PlusContacts, -- or these
+		 ClosedBaselinePROM, ClosedPairedPROM)) u
+
+WHERE Der_PreferredTermSNOMED = 'All'
+
+
+INSERT INTO MHDInternal.Temp_CMH_PROMs_Pivot
+
+SELECT
+	ReportingPeriodEndDate
+	,Provider_Type
+	,Provider_Code
+	,Provider_Name
+	,SubICB_Code
+	,SubICB_Name
+	,ICB_Code
+	,ICB_Name
+	,Region_Code
+	,Region_Name
+	,Der_AssessmentToolName
+	,Der_PreferredTermSNOMED
+	,Der_TeamType
+	,AgeGroup_At_Ref
+	,MeasureName
+	,MeasureValue
+	,CASE 
+		WHEN MeasureName = 'OpenBaselinePROM' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROM' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROMImprovement' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMImprovement_alt' THEN OpenReferrals2PlusContacts6Months2 
+		WHEN MeasureName = 'OpenPairedPROMDeterioration' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMNoChange' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenPairedPROMAboveClinicalCutOffReliableRecovery' THEN OpenPairedPROMAboveClinicalCutOff 
+		WHEN MeasureName = 'OpenBaselineScoreSum' THEN OpenPairedPROM2  -- mean baseline for paired scores only 
+		WHEN MeasureName = 'OpenFollowUpScoreSum' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'OpenChangeScoreSum' THEN OpenPairedPROM2 
+		WHEN MeasureName = 'ClosedBaselinePROM' THEN ClosedReferrals2PlusContacts2
+		WHEN MeasureName = 'ClosedPairedPROM' THEN ClosedReferrals2PlusContacts2
+		WHEN MeasureName = 'ClosedPairedPROMImprovement' THEN ClosedPairedPROM2 
+		WHEN MeasureName = 'ClosedPairedPROMImprovement_alt' THEN ClosedReferrals2PlusContacts2 
+		WHEN MeasureName = 'ClosedPairedPROMDeterioration' THEN ClosedPairedPROM2
+		WHEN MeasureName = 'ClosedPairedPROMNoChange' THEN ClosedPairedPROM2
+		WHEN MeasureName = 'ClosedPairedPROMAboveClinicalCutOffReliableRecovery' THEN ClosedPairedPROMAboveClinicalCutOff
+		WHEN MeasureName = 'ClosedBaselineScoreSum' THEN ClosedPairedPROM2  -- mean baseline for paired scores only 
+		WHEN MeasureName = 'ClosedFollowUpScoreSum' THEN ClosedPairedPROM2 
+		WHEN MeasureName = 'ClosedChangeScoreSum' THEN ClosedPairedPROM2
+	END AS Denominator
+
+FROM MHDInternal.Temp_CMH_PROMs_Agg_Comb a
+
+UNPIVOT (MeasureValue FOR MeasureName IN 
+		(OpenBaselinePROM, OpenPairedPROM, OpenPairedPROMImprovement, OpenPairedPROMImprovement_alt, OpenPairedPROMDeterioration, OpenPairedPROMNoChange,OpenPairedPROMAboveClinicalCutOffReliableRecovery, 
+		 OpenBaselineScoreSum, OpenFollowUpScoreSum, OpenChangeScoreSum,
+		 ClosedBaselinePROM, ClosedPairedPROM, ClosedPairedPROMImprovement, ClosedPairedPROMImprovement_alt, ClosedPairedPROMDeterioration ,ClosedPairedPROMNoChange,ClosedPairedPROMAboveClinicalCutOffReliableRecovery,
+		 ClosedBaselineScoreSum, ClosedFollowUpScoreSum, ClosedChangeScoreSum)) u
+
+WHERE Der_PreferredTermSNOMED <> 'All' 
+AND Der_PreferredTermSNOMED NOT IN ('DIALOG patient rated outcome measure item 9 score - how satisfied are you with your medication',
+'DIALOG patient rated outcome measure item 10 score - how satisfied are you with the practical help you receive',
+'DIALOG patient rated outcome measure item 11 score - how satisfied are you with consultations with mental health professionals') -- don't measure change on PREM items
+
+
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+PRODUCE FINAL DASHBOARD BACKING DATA TABLE 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+
+IF OBJECT_ID ('MHDInternal.Dashboard_MH_CMH_PROMS') IS NOT NULL
+DROP TABLE MHDInternal.Dashboard_MH_CMH_PROMS
+
+SELECT
+p.ReportingPeriodEndDate,
+p.Provider_Type,
+p.Provider_Code,
+p.Provider_Name,
+p.SubICB_Code,
+p.SubICB_Name,
+p.ICB_Code,
+p.ICB_Name,
+p.Region_Code,
+p.Region_Name,
+p.Der_AssessmentToolName,
+p.Der_PreferredTermSNOMED,
+p.Der_TeamType,
+p.AgeGroup_At_Ref,
+CASE WHEN p.MeasureName IN ('ClosedBaselinePROM','ClosedBaselineScoreSum','ClosedChangeScoreSum','ClosedFollowUpScoreSum','ClosedPairedPROM','ClosedPairedPROMAboveClinicalCutOffReliableRecovery','ClosedPairedPROMDeterioration','ClosedPairedPROMImprovement','ClosedPairedPROMImprovement_alt','ClosedPairedPROMNoChange') THEN 'Closed' ELSE 'Open' END AS MeasureType,
+CASE 
+	WHEN p.MeasureName IN ('ClosedBaselinePROM','OpenBaselinePROM') THEN 'BaselinePROM' 
+	WHEN p.MeasureName IN ('ClosedBaselineScoreSum','OpenBaselineScoreSum') THEN 'BaselineScoreSum' 
+	WHEN p.MeasureName IN ('ClosedChangeScoreSum','OpenChangeScoreSum') THEN 'ChangeScoreSum'
+	WHEN p.MeasureName IN ('ClosedFollowUpScoreSum','OpenFollowUpScoreSum') THEN 'FollowUpScoreSum'
+	WHEN p.MeasureName IN ('ClosedPairedPROM','OpenPairedPROM') THEN 'PairedPROM' 
+	WHEN p.MeasureName IN ('ClosedPairedPROMAboveClinicalCutOffReliableRecovery','OpenPairedPROMAboveClinicalCutOffReliableRecovery') THEN 'PairedPROMAboveClinicalCutOffReliableRecovery'
+	WHEN p.MeasureName IN ('ClosedPairedPROMDeterioration','OpenPairedPROMDeterioration') THEN 'PairedPROMDeterioration'
+	WHEN p.MeasureName IN ('ClosedPairedPROMImprovement','OpenPairedPROMImprovement') THEN 'PairedPROMImprovement'
+	WHEN p.MeasureName IN ('ClosedPairedPROMImprovement_alt','OpenPairedPROMImprovement_alt') THEN 'PairedPROMImprovement_alt'
+	WHEN p.MeasureName IN ('ClosedPairedPROMNoChange','OpenPairedPROMNoChange') THEN 'PairedPROMNoChange'
+END AS MeasureName,
+p.MeasureValue,
+p.Denominator,
+ISNULL(sd.SD_Control, NULL) AS SD_Control
+
+INTO MHDInternal.Dashboard_MH_CMH_PROMS
+
+FROM MHDInternal.Temp_CMH_PROMs_Pivot p
+LEFT JOIN MHDInternal.Temp_CMH_PROMs_SD_Control sd on p.Der_PreferredTermSNOMED = sd.Der_PreferredTermSNOMED and p.MeasureName IN ('OpenChangeScoreSum', 'ClosedChangeScoreSum')
+WHERE (Denominator IS NULL OR Denominator > 0)
+AND (MeasureValue > 0 OR Denominator IS NOT NULL)
+
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+DROP TEMP TABLES 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>*/
+
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Ref
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Contacts
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Contacts_Cumulative
+DROP TABLE MHDInternal.Temp_CMH_PROMs_All_Assessments
+DROP TABLE MHDInternal.Temp_CMH_Paired_PROMs
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Master
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref2
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Ref3
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_OM
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_OMType
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Agg_Comb
+DROP TABLE MHDInternal.Temp_CMH_PROMs_SD_Control
+DROP TABLE MHDInternal.Temp_CMH_PROMs_Pivot 
+
