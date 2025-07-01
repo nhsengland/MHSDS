@@ -692,7 +692,8 @@ SELECT
 	END AS Der_DischargeMethod 
 	,s.DischDestCodeHospProvSpell
 	,CASE 
-		WHEN s.DischDestCodeHospProvSpell IN ('19','29') THEN 'Usual/temporary place of residence' 
+		WHEN s.DischDestCodeHospProvSpell IN ('19') THEN 'Usual place of residence' 
+		WHEN s.DischDestCodeHospProvSpell IN ('29') THEN 'Temporary place of residence' 
 		WHEN s.DischDestCodeHospProvSpell IN ('37','39','40','42') THEN 'Court/police/justice' 
 		WHEN s.SourceAdmCodeHospProvSpell IN ('51','52') THEN 'NHS Acute Provider' 
 		WHEN s.DischDestCodeHospProvSpell IN ('49','53') THEN 'NHS MH&LD Ward'
@@ -718,8 +719,12 @@ SELECT
 		WHEN s.WardLocDistanceHome_last BETWEEN 0 AND 4 THEN '0-4km' 
 		WHEN s.WardLocDistanceHome_last BETWEEN 5 AND 9 THEN '5-9km'
 		WHEN s.WardLocDistanceHome_last BETWEEN 10 AND 19 THEN '10-19km' 
-		WHEN s.WardLocDistanceHome_last BETWEEN 20 AND 49 THEN '20-49km' 
-		WHEN s.WardLocDistanceHome_last >= 50 THEN '50+km' 
+		WHEN s.WardLocDistanceHome_last BETWEEN 20 AND 29 THEN '20-29km'
+		WHEN s.WardLocDistanceHome_last BETWEEN 30 AND 39 THEN '20-39km' 
+		WHEN s.WardLocDistanceHome_last BETWEEN 40 AND 49 THEN '40-49km' 
+		WHEN s.WardLocDistanceHome_last BETWEEN 50 AND 59 THEN '50-59km' 
+		WHEN s.WardLocDistanceHome_last BETWEEN 60 AND 69 THEN '60-69km' 
+		WHEN s.WardLocDistanceHome_last >= 70 THEN '70+km' 
 	ELSE 'Missing/Invalid'
 	END AS Der_WardDistanceHome_Cat
 	,s.Der_Admission
