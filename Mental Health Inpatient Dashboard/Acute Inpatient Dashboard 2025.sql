@@ -299,7 +299,7 @@ SELECT
 	,CASE WHEN a.StartDateHospProvSpell BETWEEN a.ReportingPeriodStartDate AND a.ReportingPeriodEndDate THEN 1 ELSE 0 END AS Der_Admission 
 	,CASE WHEN a.DischDateHospProvSpell BETWEEN a.ReportingPeriodStartDate AND a.ReportingPeriodEndDate THEN 1 ELSE 0 END AS Der_Discharge 
 	,CASE WHEN a.DischDateHospProvSpell IS NULL OR a.DischDateHospProvSpell > a.ReportingPeriodEndDate THEN 1 ELSE 0 END AS Der_Open 
-	,DATEDIFF(DD, a.StartDateHospProvSpell, a.DischDateHospProvSpell)+1 AS Der_LOS -- closed spells only 
+	,DATEDIFF(DD, a.StartDateHospProvSpell, a.DischDateHospProvSpell) AS Der_LOS -- closed spells only 
 	,CASE 
 		WHEN a.StartDateHospProvSpell < a.ReportingPeriodStartDate AND a.DischDateHospProvSpell BETWEEN a.ReportingPeriodStartDate AND a.ReportingPeriodEndDate THEN DATEDIFF(DD, a.ReportingPeriodStartDate, a.DischDateHospProvSpell) 
 		WHEN a.StartDateHospProvSpell < a.ReportingPeriodStartDate AND a.DischDateHospProvSpell NOT BETWEEN a.ReportingPeriodStartDate AND a.ReportingPeriodEndDate THEN DATEDIFF(DD, a.ReportingPeriodStartDate, a.ReportingPeriodEndDate)+1
