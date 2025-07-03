@@ -4,7 +4,7 @@ This repository contains the SQL code used in NHS England's routine reporting fr
 Please note this information is experimental and it is only intended for use for management purposes.
 
 # Contact
-england.mhanalytics@nhs.net
+england.mentalhealthanalysis@nhs.net
 
 # Licence
 
