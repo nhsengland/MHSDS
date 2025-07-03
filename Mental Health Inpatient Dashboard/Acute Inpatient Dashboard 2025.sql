@@ -1287,6 +1287,7 @@ SELECT
 	,CASE WHEN w.AvailBedDays > 0 AND w.Total_BedDays > 0 THEN CAST(w.AvailBedDays AS INT) ELSE 0 END AS AvailBedDays2 -- denominator 
 	,CASE WHEN w.AvailBedDays > 0 AND w.Total_BedDays >0 THEN CAST(w.ClosedBedDays AS INT) ELSE 0 END AS ClosedBedDays
 	,CASE WHEN w.AvailBedDays > 0 AND w.Total_BedDays > 0 THEN w.Total_BedDays ELSE 0 END AS Occupied_BedDays
+	,CASE WHEN w.AvailBedDays > 0 AND w.Total_BedDays > 0 THEN CAST(w.AvailBedDays AS INT) - w.Total_BedDays ELSE 0 END AS Unoccupied_BedDays
 	,CASE WHEN w.AvailBedDays > 0 AND w.Total_BedDays > 0 THEN CAST(w.AvailBedDays AS INT) + CAST(w.ClosedBedDays AS INT) ELSE 0 END AS Total_BedDays -- denom for % closed
 	,w.WS_Started
 	,w.WS_Ended
@@ -2507,14 +2508,14 @@ SELECT
 	,CASE 
 		WHEN MeasureName IN ('Val_AvailableBedDays','Val_TotalBedDays') THEN [WardMonthCount]
 		WHEN MeasureName IN ('ClosedBedDays') THEN Total_BedDays -- closed bed days denom needs to be adjusted to also include numerator 
-        	WHEN MeasureName IN ('Occupied_BedDays') THEN AvailBedDays2
+        	WHEN MeasureName IN ('Occupied_BedDays','Unoccupied_BedDays') THEN AvailBedDays2
 	ELSE NULL 
 	END AS Denominator 
 
 FROM MHDInternal.Temp_AcuteDash_Agg_Wards
 
 UNPIVOT (MeasureValue FOR MeasureName IN 
-		([Val_AvailableBedDays],[Val_TotalBedDays],[AvailBedDays],[ClosedBedDays],[Occupied_BedDays],[WS_Started],[WS_Open],[WS_Ended])) u  
+		([Val_AvailableBedDays],[Val_TotalBedDays],[AvailBedDays],[ClosedBedDays],[Occupied_BedDays],[Unoccupied_BedDays],[WS_Started],[WS_Open],[WS_Ended])) u  
 
 /*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>	
 UNPIVOT FOR DASHBOARD OUTPUT - DEMOGRAPHIC BREAKDOWNS
